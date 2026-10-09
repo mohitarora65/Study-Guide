@@ -1,7 +1,7 @@
 # Operations — Grounded Mathematics Study Guide
 
-**Status:** V1.5 deployment-readiness document. No public deployment has been performed or authorized.  
-**Last updated:** 2026-10-09
+**Status:** V1.5 deployment readiness plus V2.2 partial local adaptive-quiz evaluation. A V2 deployment is proposed in `DEPLOYMENT_PLAN_V2.md` and awaits its remaining approvals and prerequisites.
+**Last updated:** 2026-10-10
 
 ## Deployment target
 
@@ -83,6 +83,9 @@ Record date, tester role, result and evidence without recording secrets, identit
 7. Synthetic chat history can be revisited. Deletion is tested only with an explicitly disposable synthetic thread and action-time confirmation when performed through a browser.
 8. A second authorized account verifies cross-user isolation if available; otherwise record browser-level cross-account testing as `NOT TESTED` and cite the existing automated ownership tests.
 9. Record response latency and any provider/quota errors. Do not extrapolate the three-request development burst into class-capacity claims.
+10. Admin creates or activates one approved topic; student generates exactly seven MCQs, submits all answers and sees cited feedback.
+11. Student progress shows only summary attempts and rolling mastery; admin lookup by institutional email shows the same mastery.
+12. Profile deletion is tested only with an explicitly disposable synthetic quiz profile and must remove its mastery/attempt summaries.
 
 ## Routine operation
 
@@ -91,7 +94,10 @@ Record date, tester role, result and evidence without recording secrets, identit
 - AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
 - Gemini embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
 - Do not re-index or delete the ready course document as a health check.
-- Apply migrations only in filename order and only after separately confirming the target project and reviewing the SQL. No migration is planned for V1.5.
+- Quiz generation is limited to six requests per user per app process per hour. A failed generation also consumes one slot.
+- V2.2's three approved synthetic generations all reached the provider's output-length finish condition (HTTP 200) and returned the safe failure. The total call cap is exhausted. Do not retry, switch providers, or relax validation under this phase; the 3,500-token output limit has not yet been live-verified.
+- Quiz questions are transient. Only score, mastery, difficulty mix, topic, email-linked profile and timestamps are stored.
+- Apply migrations only in filename order and only after separately confirming the target project and reviewing the SQL. Future migrations require a separately approved phase.
 
 ## Incident triage
 
@@ -101,6 +107,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 | Login loop/failure | Final app URL, Streamlit `auth.redirect_uri`, Google authorized redirect URI | Make the URIs identical, including HTTPS and `/oauth2callback`; do not weaken domain checks. |
 | All questions fail before generation | Gemini quota/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
 | Generation fails | AI STAR balance/status/key | Keep safe error output; do not switch models/providers without a new approval. |
+| Quiz generation fails | Gemini retrieval, active material coverage, AI STAR latency/status and hourly limit | Keep the safe error; do not save an attempt or relax JSON/citation validation. |
 | Incorrect or missing citations | Retrieval/evaluation evidence and active document version | Pause pilot use if systemic; do not lower citation validation. |
 | Suspected secret exposure | Affected service and repository/log surface | Disable the app if needed, rotate the specific credential, inspect exposure scope and record the incident. Never paste the credential into chat. |
 | Suspected cross-user access | Owner filters, logs without content, automated isolation tests | Disable the app immediately and investigate before restoring access. |
@@ -119,6 +126,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Gemini embeddings are paid and metered; exact deployed cost is not available from the app.
 - AI STAR consumes the purchased balance with a user-reported ×0.1 multiplier and stop-at-zero behavior. Dollar pricing, expiry and storage/retention remain unverified.
 - Questions go to Gemini for embedding. Questions, bounded recent conversation and retrieved excerpts go to AI STAR for generation. Names, email addresses and identity tokens are not intentionally sent.
+- Quiz topic text goes to Gemini for retrieval; topic plus bounded retrieved excerpts go to AI STAR. The student key and email stay outside the graph/provider payload.
 - Streamlit Community Cloud and Supabase free services have no class-wide uptime or concurrency guarantee.
 - The measured three-concurrent-request burst completed successfully, but it is not evidence for 120 simultaneous generations.
 

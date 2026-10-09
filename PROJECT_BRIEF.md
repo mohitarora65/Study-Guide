@@ -1,6 +1,6 @@
 # Project Brief — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user replied “yes” on 2026-10-09  
+**Status:** APPROVED — user replied “yes” on 2026-10-09
 **Date:** 2026-10-09
 
 ## Problem
@@ -80,4 +80,56 @@ Deploy a usable, low-cost web application for one course and one shared collecti
 - Hosting, authentication, database, file storage, vector search, and AI provider choices.
 - Data retention and deletion policy.
 - Detailed architecture, interface design, roadmap, and implementation phases.
+
+## Version 2 Proposal — Adaptive Quiz Agent
+
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Discovery date:** 2026-10-09
+
+### Goal
+
+Add PDF-grounded adaptive quizzes that help each student measure and improve mastery of administrator-defined course topics across multiple sessions.
+
+### Confirmed Student Journey
+
+1. The student chooses a topic from a list managed by the admin.
+2. Semantic retrieval finds relevant passages from the active course PDFs.
+3. The system generates seven fresh multiple-choice questions grounded in those passages.
+4. The student answers all seven questions before seeing feedback.
+5. The results page shows the score, correct answers, grounded explanations and PDF/page citations.
+6. A weighted rolling mastery score is updated for that student and topic.
+7. Future quizzes use the saved mastery score to adjust their difficulty mix.
+
+### Confirmed Scope
+
+- Admin-managed topic names; no manual PDF page mapping.
+- Seven fresh MCQs per attempt with no duplicates inside one quiz.
+- Feedback only after all seven answers are submitted.
+- Per-student, per-topic mastery persisted across sessions.
+- Summary-only history: topic, score, resulting mastery and completion date.
+- Student progress visible to that student.
+- Admin dashboard with student-level scores and mastery identified by institutional email.
+
+### Out of Scope for This Proposal
+
+- Short-answer grading.
+- Student-created topics.
+- Manual topic-to-page mapping.
+- Reopening or replaying full past quizzes.
+- A reusable curated question-bank editor.
+- Web-grounded quiz questions.
+
+### Privacy Change
+
+Version 1 stores an opaque keyed identity and avoids persisting student email addresses. The proposed admin dashboard requires storing each student's institutional email alongside quiz progress. The design must restrict this identifiable education-progress data to the owning student and configured admins and must define retention and deletion behavior before implementation.
+
+### Proposed Success Criteria
+
+- Every generated question, correct answer and explanation is supported by retrieved active PDF passages.
+- Every result includes valid document/page citations.
+- A quiz contains exactly seven usable MCQs with one unambiguous correct option each.
+- Submission is graded deterministically from the validated answer key without a second model call.
+- Mastery is updated consistently and changes the difficulty mix of later attempts.
+- Students cannot read another student's attempts or mastery.
+- Only configured admins can view student emails and class progress.
 

@@ -61,7 +61,35 @@ def test_authenticated_navigation_assigns_unique_page_paths(monkeypatch) -> None
         SimpleNamespace(), SimpleNamespace(is_admin=True)
     )
 
-    assert [page["url_path"] for page in pages] == ["study", "documents"]
+    assert [page["url_path"] for page in pages] == [
+        "study",
+        "quiz",
+        "progress",
+        "documents",
+        "quiz-topics",
+        "student-progress",
+    ]
+
+
+def test_student_navigation_does_not_include_admin_pages(monkeypatch) -> None:
+    pages = []
+    monkeypatch.setattr(study_app, "render_account_controls", Mock())
+    monkeypatch.setattr(
+        study_app.st,
+        "Page",
+        lambda page, **kwargs: pages.append(kwargs) or page,
+    )
+    monkeypatch.setattr(
+        study_app.st,
+        "navigation",
+        lambda *_args, **_kwargs: SimpleNamespace(run=Mock()),
+    )
+
+    study_app.render_authenticated_app(
+        SimpleNamespace(), SimpleNamespace(is_admin=False)
+    )
+
+    assert [page["url_path"] for page in pages] == ["study", "quiz", "progress"]
 
 
 def test_study_history_remains_available_when_answer_provider_is_unconfigured() -> None:
@@ -126,3 +154,139 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert (owner, thread_id) == ("synthetic-owner", "thread-new")
     assert turn["question"] == "What is a basis?"
     assert turn["citations"] == [{"chunk_id": "c1", "page_number": 25}]
+
+
+def test_quiz_generates_seven_answers_and_saves_only_summary() -> None:
+    script = '''
+import streamlit as st
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+from study_guide.quizzing import GeneratedQuiz, QuizQuestion
+
+settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+identity = SimpleNamespace(
+    user_key="synthetic-owner", email="student@iiti.ac.in", is_admin=False
+)
+question = QuizQuestion(
+    prompt="Which set is a basis?",
+    options=("A", "B", "C", "D"),
+    correct_index=0,
+    difficulty="easy",
+    explanation="A is independent and spanning.",
+    citations=({"display_name": "notes.pdf", "page_number": 12},),
+)
+quiz = GeneratedQuiz(
+    topic="Vector spaces",
+    mastery_before=None,
+    difficulty_mix={"easy": 4, "medium": 3, "hard": 0},
+    questions=(question,) * 7,
+)
+def save_summary(_client, **values):
+    st.session_state["saved_quiz_summary"] = values
+    return {"score": 100, "mastery_before": None, "mastery_after": 100,
+            "attempt_count": 1, "duplicate": False}
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "topic-1", "name": "Vector spaces", "active": True}
+     ]), \\
+     patch.object(app, "get_topic_mastery", return_value=None), \\
+     patch.object(app, "generate_quiz", return_value=quiz), \\
+     patch.object(app, "complete_quiz_attempt", side_effect=save_summary):
+    app.render_quiz_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+
+    next(button for button in app.button if button.label == "Generate 7-question quiz").click().run()
+    assert not app.exception
+    assert len(app.radio) == 7
+    for radio in app.radio:
+        radio.set_value(0)
+    next(button for button in app.button if button.label == "Submit all answers").click().run()
+
+    assert not app.exception
+    saved = app.session_state["saved_quiz_summary"]
+    assert saved["user_key"] == "synthetic-owner"
+    assert saved["email"] == "student@iiti.ac.in"
+    assert saved["correct_count"] == 7
+    assert "questions" not in saved
+    assert any("Score: 7/7" in success.value for success in app.success)
+
+
+def test_student_progress_shows_mastery_and_attempt_summaries() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+settings = SimpleNamespace()
+identity = SimpleNamespace(user_key="synthetic-owner")
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_student_quiz_progress", return_value=[{
+         "topic": "Vector spaces", "mastery_score": 71,
+         "latest_score": 71.43, "attempt_count": 1,
+     }]), \\
+     patch.object(app, "list_student_quiz_attempts", return_value=[{
+         "topic": "Vector spaces", "correct_count": 5, "score": 71.43,
+         "mastery_after": 71, "completed_at": "2026-10-10T00:00:00Z",
+     }]):
+    app.render_quiz_progress_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run(timeout=10)
+
+    assert not app.exception
+    assert [item.value for item in app.subheader] == ["Topic mastery", "Quiz summaries"]
+    assert len(app.dataframe) == 2
+
+
+def test_admin_progress_filter_matches_email_case_insensitively() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+rows = [
+    {"user_key": "owner-1", "email": "student@iiti.ac.in", "topic": "Vectors",
+     "mastery_score": 71, "latest_score": 71.43, "attempt_count": 1,
+     "updated_at": "2026-10-10T00:00:00Z"},
+    {"user_key": "owner-2", "email": "other@iiti.ac.in", "topic": "Matrices",
+     "mastery_score": 50, "latest_score": 50, "attempt_count": 2,
+     "updated_at": "2026-10-10T00:00:00Z"},
+]
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_admin_quiz_progress", return_value=rows):
+    app.render_admin_quiz_progress_page(SimpleNamespace())
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+
+    app.text_input[0].set_value("STUDENT@IITI.AC.IN").run()
+
+    assert not app.exception
+    assert len(app.dataframe) == 1
+    assert app.dataframe[0].value.iloc[0]["Email"] == "student@iiti.ac.in"
+
+
+def test_admin_can_add_a_quiz_topic() -> None:
+    script = '''
+import streamlit as st
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+def create_topic(_client, name):
+    st.session_state["created_topic"] = name
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "create_quiz_topic", side_effect=create_topic), \\
+     patch.object(app, "list_quiz_topics", return_value=[]):
+    app.render_quiz_topics_page(SimpleNamespace())
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+
+    app.text_input[0].set_value("Vector spaces")
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert app.session_state["created_topic"] == "Vector spaces"

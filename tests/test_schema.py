@@ -3,6 +3,7 @@ from pathlib import Path
 
 SCHEMA = Path("supabase/migrations/001_initial.sql").read_text()
 INGESTION_SCHEMA = Path("supabase/migrations/002_ingestion.sql").read_text()
+QUIZ_SCHEMA = Path("supabase/migrations/003_adaptive_quiz.sql").read_text()
 
 
 def test_schema_contains_required_tables_and_vector_column() -> None:
@@ -67,3 +68,17 @@ def test_ingestion_schema_activates_atomically_and_searches_only_active_ready_ch
     assert "v.status = 'ready'" in INGESTION_SCHEMA
     assert "p_embedding_dimension <> 768" in INGESTION_SCHEMA
     assert "status = 'deleting', active_version_id = null" in INGESTION_SCHEMA
+
+
+def test_quiz_schema_is_private_and_stores_summaries_only() -> None:
+    for table in ("quiz_topics", "quiz_profiles", "topic_mastery", "quiz_attempts"):
+        assert f"create table public.{table}" in QUIZ_SCHEMA
+        assert f"alter table public.{table} enable row level security" in QUIZ_SCHEMA
+        assert f"revoke all on table public.{table} from anon, authenticated" in QUIZ_SCHEMA
+
+    assert "question" not in QUIZ_SCHEMA
+    assert "p_email text" in QUIZ_SCHEMA
+    assert "on delete cascade" in QUIZ_SCHEMA
+    assert "function public.complete_quiz_attempt" in QUIZ_SCHEMA
+    assert "function public.delete_quiz_profile" in QUIZ_SCHEMA
+    assert "select tm.mastery_score, tm.attempt_count" in QUIZ_SCHEMA

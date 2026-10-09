@@ -1,7 +1,7 @@
 # Architecture — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user replied “yes” on 2026-10-09  
-**Date:** 2026-10-09  
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Date:** 2026-10-09
 
 **Approved clarification, 2026-10-09:** V1.2 uses Google `gemini-embedding-2` at 768 dimensions. DeepSeek V4 Flash is a proposed V1.3 answer model only; no third-party generation integration is approved yet.
 
@@ -146,3 +146,131 @@ The reported 10-million-token allowance belongs to the separate third-party gene
 - No background worker service in Version 1. Admin ingestion may run synchronously with visible progress if it fits measured limits.
 - No OCR, agents, web search, autonomous tools or analytics dashboard.
 - No LangChain/LangGraph unless an approved later requirement introduces orchestration that direct calls cannot express clearly.
+
+## 13. Version 2 Architecture — Adaptive Quiz
+
+**Status:** APPROVED — user replied “approve” on 2026-10-10
+**Date:** 2026-10-10
+**Approved stack input:** LangChain + LangGraph selected at V2-G3.
+
+### 13.1 Boundary and Components
+
+Version 2 adds four focused pieces while preserving the Version 1 application:
+
+- **Quiz view:** topic selection, active attempt, delayed feedback, results and summary history.
+- **Quiz workflow:** a deterministic LangGraph graph for retrieval, generation, validation and one bounded repair path.
+- **Quiz persistence:** narrow Supabase functions for topics, profiles, mastery, attempt completion, analytics and deletion.
+- **Admin views:** topic management and student-progress summaries.
+
+The existing direct answer flow remains unchanged. Quiz generation uses LangChain's `ChatOpenAI` against the approved AI STAR OpenAI-compatible base URL. A compatibility check must confirm ordinary invocation and JSON mode before implementation proceeds past the adapter boundary; provider-native JSON Schema is not assumed.
+
+### 13.2 Identity and Privacy Boundary
+
+`Identity` gains the normalized verified institutional email because admin quiz analytics require it. The opaque `user_key` remains the ownership key. Email is stored once in a quiz profile, used only in quiz persistence/admin display, and excluded from graph state, embeddings, prompts, logs, errors and analytics telemetry.
+
+The browser still has no Supabase credential. The Streamlit server uses its secret/service credential, re-checks login and role, and scopes every student query by `user_key`. Because that credential bypasses RLS, every new table revokes browser-role access and every database function revokes default/public execution. Admin list/delete functions are callable only after the application confirms `identity.is_admin`.
+
+### 13.3 Data Model
+
+| Record | Minimum fields and rules |
+|---|---|
+| `quiz_topics` | ID, display name, normalized unique name, active flag, created/updated timestamps. Deactivation blocks new attempts but preserves summaries. |
+| `quiz_profiles` | `user_key` primary key, normalized institutional email, created/updated timestamps. One email copy per student. |
+| `topic_mastery` | `user_key` + topic ID primary key, mastery integer `0–100`, attempt count, latest score and updated timestamp. |
+| `quiz_attempts` | Attempt UUID/idempotency key, `user_key`, topic ID, correct count `0–7`, score, mastery before/after, difficulty mix JSON and completion timestamp. No questions, options, answers, explanations or citations. |
+
+Foreign keys cascade profile deletion through mastery and attempts. Topic deletion is not exposed; topics are deactivated so historical summaries keep a stable label.
+
+### 13.4 LangGraph State and Flow
+
+Graph state contains only quiz-generation data:
+
+```text
+topic_name
+mastery_score
+difficulty_mix
+retrieved_evidence
+candidate_questions
+repair_count
+safe_error
+```
+
+It explicitly excludes email, user key, access tokens, provider keys and database-write authority.
+
+```text
+START
+  ↓
+retrieve_evidence ──insufficient──→ safe_failure
+  ↓
+generate_questions
+  ↓
+validate_questions ──valid──→ END
+  │
+  └──invalid and repair_count=0──→ repair_questions ─→ validate_questions
+                                      │
+                                      └──still invalid──→ safe_failure
+```
+
+- `retrieve_evidence` calls the existing Gemini query embedding and active-chunk search using the selected topic name.
+- `generate_questions` calls AI STAR once through LangChain JSON mode with the required difficulty mix and bounded retrieved excerpts.
+- `validate_questions` is deterministic application code enforcing the PRD's exact count, fields, lengths, unique options/questions, answer indexes, difficulty mix and retrieved citation IDs.
+- `repair_questions` makes at most one provider call using the original evidence and validation errors.
+- `safe_failure` returns a student-safe retry or insufficient-evidence result and performs no persistence.
+
+The graph is compiled without a checkpointer or LangGraph store. Active questions remain in Streamlit session state; durable summaries/mastery remain in Supabase.
+
+### 13.5 Quiz Creation and Submission
+
+1. Re-check the authenticated identity and selected active topic.
+2. Load mastery by `user_key`; a missing row means the Foundation difficulty mix.
+3. Generate a random attempt UUID and invoke the graph with topic, mastery and mix only.
+4. Store the validated quiz and attempt UUID in Streamlit session state. No database row exists yet.
+5. Require one selected option for every question before enabling submission.
+6. Grade locally against the validated in-session answer key.
+7. Call one transactional `complete_quiz_attempt` database function with the server-computed score and attempt UUID.
+8. Inside the transaction, create/update the profile, insert the summary, lock/read mastery, calculate the approved weighted value and upsert mastery.
+9. A repeated UUID returns its existing summary without inserting or updating mastery again.
+10. Render feedback from the in-session quiz plus the committed mastery result.
+
+If the session disappears before submission, the unpersisted quiz is lost. If the database commit fails, show an error and keep the in-session quiz so submission can be retried with the same UUID.
+
+### 13.6 Mastery Rules
+
+- Server code and the database function share the approved formula and boundary tests.
+- First completion: mastery equals rounded score.
+- Later completion: `round(0.60 × latest score + 0.40 × previous mastery)`.
+- Foundation `0–49`: four easy, three medium.
+- Developing `50–79`: two easy, four medium, one hard.
+- Strong `80–100`: one easy, three medium, three hard.
+
+The database returns the committed mastery; the UI never treats a client/session calculation as authoritative.
+
+### 13.7 Failure and Capacity Rules
+
+| Failure | Required behavior |
+|---|---|
+| LangChain adapter incompatibility | Stop the phase at the compatibility check; do not add a second hidden provider path. |
+| Weak topic retrieval | Explain that the uploaded material does not sufficiently cover the topic; create no attempt. |
+| Invalid generation after repair | Show a safe retry message; create no attempt or mastery change. |
+| Session loss before submission | Quiz is lost; summary/mastery stay unchanged. |
+| Database failure on submission | Preserve the active session quiz and UUID; allow idempotent retry. |
+| Duplicate submit/rerun | Return the existing committed summary; do not update mastery twice. |
+| Topic deactivated during an active attempt | Allow submission for the already generated attempt; prevent later starts. |
+| Email changes at the identity provider | Update the profile email on the next successful quiz completion after exact-domain verification. |
+
+Quiz generation shares the existing global generation semaphore. Add a separate per-user quiz-start limit rather than counting page reruns. Exact limits are calibrated in the implementation phase without changing the seven-question contract.
+
+### 13.8 Deletion and Retention
+
+Admin deletion names the student's email, requires confirmation and invokes one transaction that deletes attempts, mastery and the quiz profile. It does not delete unrelated chat history because Version 1 deliberately stores chat under the opaque key without email. Operations documentation requires this quiz-data deletion at course end. No automated schedule or background worker is added.
+
+### 13.9 Required Verification
+
+- LangChain custom-base-URL and JSON-mode compatibility against AI STAR using synthetic content.
+- Graph branch tests for success, insufficient evidence, one repair and terminal failure.
+- Schema/domain tests for malformed questions, duplicate options/questions, wrong difficulty mix and fabricated citations.
+- Transaction/idempotency tests across first, repeated and later attempts.
+- Cross-student isolation and admin-only email analytics/deletion tests.
+- No-email-in-provider-payload/log assertions.
+- Streamlit tests for topic selection, seven required answers, delayed feedback, results and admin controls.
+- Existing Version 1 regression suite.

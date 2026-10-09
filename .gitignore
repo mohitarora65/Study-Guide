@@ -7,4 +7,5 @@ __pycache__/
 .coverage
 htmlcov/
 evaluation/results/
+evaluation/quiz_results/
 pdfs/

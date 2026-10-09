@@ -1,10 +1,10 @@
 # Grounded Mathematics Study Guide
 
-A Streamlit study assistant for IIT Indore's Mathematics for AI/ML course. The approved Version 1 will answer only from teaching-assistant-managed PDFs, show document/page citations and refuse when the material is insufficient.
+A Streamlit study assistant for IIT Indore's Mathematics for AI/ML course. It answers only from teaching-assistant-managed PDFs and now includes a locally implemented adaptive-quiz workflow.
 
 ## Current State
 
-V1.2 adds admin-only private PDF ingestion, page-linked embeddings, document status/retry/re-index/delete controls and a server-only retrieval function. V1.3 adds grounded student answers, page citations and private chat history. V1.4 evaluation and local hardening were signed off by the user on 2026-10-09. V1.5 deployment readiness and rollback documentation are complete at the mandatory pre-deployment checkpoint. No deployment has been performed or authorized.
+V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2.1 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. V2.1 is implemented locally; V2.2 evaluation is partial, and the V2 deployment plan is proposed but not yet approved for execution.
 
 ## Requirements
 
@@ -45,7 +45,7 @@ Without a local secrets file, the app intentionally shows a safe configuration m
 
 ## Deployment
 
-The approved target is Streamlit Community Cloud with Python 3.12, a dedicated GitHub repository and `app.py` as the entrypoint. This project is not yet deployed. Do not publish the current home-directory Git root or commit `.streamlit/secrets.toml` or `pdfs/`. See [OPERATIONS.md](OPERATIONS.md) for the secure secrets checklist, Google OAuth callback, smoke checks, incident response and rollback.
+The target is Streamlit Community Cloud with Python 3.12, the existing dedicated GitHub repository and `app.py` as the entrypoint. The existing V1 app is live; V2 deployment is pending the proposed deployment plan, production migration approval and user-controlled push. Do not publish `.serena/`, `.streamlit/secrets.toml` or `pdfs/`. See [OPERATIONS.md](OPERATIONS.md) for the secure secrets checklist, Google OAuth callback, smoke checks, incident response and rollback.
 
 ## Database Migration
 
@@ -53,8 +53,19 @@ Apply the migrations in filename order only after confirming the target is a dev
 
 1. `supabase/migrations/001_initial.sql` creates the document, ingestion and chat tables.
 2. `supabase/migrations/002_ingestion.sql` adds ingestion metrics, the private `course-pdfs` bucket, atomic activation/deletion functions and active-version vector search.
+3. `supabase/migrations/003_adaptive_quiz.sql` adds private quiz topics, profiles, mastery and summary attempts plus atomic completion/profile-deletion functions.
 
-Both migrations enable or preserve the server-only boundary: browser roles cannot access the tables or ingestion functions, and the source-PDF bucket is private.
+All migrations preserve the server-only boundary: browser roles cannot access protected tables/functions, and the source-PDF bucket is private.
+
+## Adaptive Quiz
+
+- Admins create, rename and activate topic names.
+- A student selects a topic; semantic retrieval uses only active course chunks.
+- LangChain calls the approved OpenAI-compatible AI STAR endpoint, while a deterministic LangGraph workflow retrieves, generates, validates and allows one repair.
+- Every quiz must contain exactly seven unique MCQs with four distinct options, the mastery-selected difficulty mix and citations to retrieved chunks.
+- Answers are graded locally. Supabase stores only attempt summaries and rolling mastery: `60%` latest score plus `40%` previous mastery after the first attempt.
+- Students see only their own progress. Admins can filter progress by institutional email and delete that quiz profile and its summary history.
+- Full questions remain transient in Streamlit session state and are not stored in Supabase.
 
 ## PDF Ingestion
 
@@ -104,7 +115,7 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 
 - Only a verified email with the exact `iiti.ac.in` domain is accepted.
 - Admin access requires an exact email in the server-side allowlist.
-- Stored records use a keyed opaque identity, not the student's email.
+- Chat records use only a keyed opaque identity. Quiz profiles also store the normalized institutional email so an admin can find the requested student; it is not sent to either AI provider.
 - Browser roles have no direct table access; the Streamlit server owns protected database operations.
 - Secrets and full identity claims must not be logged.
 
@@ -114,6 +125,7 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 - Larger course books have not been tested. The 25 MiB cap is provisional, and Supabase recommends resumable uploads above 6 MB.
 - Synthetic AI STAR checks used no student identity or saved chat; the grounded-answer check sent bounded retrieved course excerpts. AI STAR retention terms are unknown and transmission is explicitly accepted by the user.
 - V1.4 live evaluation and TA scoring are complete. A09 is a user-accepted known false refusal. Brave checks confirmed the sign-in flow and authenticated Admin/Study navigation; duplicate Streamlit page paths found during testing were fixed. In light theme, application body text and the sign-in button meet WCAG AA contrast; keyboard focus and 390-pixel width were checked on the signed-out page. Dark theme and a separate student-account browser session remain untested. A three-request synthetic concurrent burst completed with 6.28–7.10 second per-request latency and citations; it is not a capacity guarantee. An OSV scan covered 74 installed Python distributions, found local pip 26.1.2 affected by [GHSA-qwm4-qh6w-59xr](https://github.com/advisories/GHSA-qwm4-qh6w-59xr), and the local installer was updated to fixed version 26.2.0. The repeat scan found no advisories. No scanner package was installed.
-- No deployment has been performed.
+- V2.1 has not been deployed; the existing V1 deployment was not changed in this phase.
 - Streamlit Community Cloud and Supabase free hosting do not guarantee capacity or uptime for simultaneous class-wide use.
+- V2.2 attempted one seven-question generation for each of three approved topics. All three provider responses ended with `LengthFinishReasonError` (HTTP 200) at the configured output limit; the call cap is exhausted, so no complete quiz could be manually reviewed. The local output-token limit was raised from 1,800 to 3,500 with regression coverage, but this adjustment could not be live-verified within the cap. Authenticated student/admin browser flows, question quality and full-quiz latency remain unverified. See `PHASE_PLAN_V2.2.md` and `OPERATIONS.md`.
 # Study-Guide

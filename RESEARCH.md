@@ -1,7 +1,7 @@
 # Research — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user replied “yes” on 2026-10-09  
-**Date:** 2026-10-09  
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Date:** 2026-10-09
 **Scope:** Product and feasibility research only; no stack has been selected.
 
 ## Executive Finding
@@ -141,4 +141,69 @@ Do not add agents, web search, quizzes, analytics, multi-course tenancy, OCR, or
 - [Google AI: Gemini API pricing and data-use distinction](https://ai.google.dev/gemini-api/docs/pricing)
 - [Google AI: Gemini API rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
 - [OWASP: Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
+
+## Version 2 Research — Adaptive Quiz Agent
+
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Date:** 2026-10-09
+
+### Finding
+
+The proposed quiz is feasible using the existing retrieval, generation, validation and Supabase boundaries. It does not need an open-ended autonomous agent. The dependable design is a constrained workflow: retrieve evidence for an admin-defined topic, generate exactly seven structured MCQs, validate the complete set, grade locally, and update mastery in one database operation.
+
+### Structured Quiz Generation
+
+LangChain's current structured-output interface can return a schema-validated object and can retry schema errors. This fits an MCQ payload containing question text, four options, one correct option, difficulty, explanation and cited retrieved-chunk IDs. Schema validation alone is insufficient: application validation must also enforce exactly seven questions, distinct option text, a valid answer index, unique questions within the attempt and citations limited to retrieved chunks.
+
+The current AI STAR endpoint already supports JSON output, and Version 1 already validates generated JSON and performs one bounded repair attempt. G3 should therefore compare keeping this small direct implementation with adding LangChain. A framework is justified only if it reduces validation/orchestration code enough to offset a new dependency and provider-adapter risk.
+
+### Stateful Adaptation
+
+Long-term mastery is application data, not conversational agent memory. LangGraph distinguishes thread checkpoints from cross-thread long-term stores and warns that in-memory persistence is lost on process restart. Because Supabase is already the system of record, topic mastery and attempt summaries should remain in Supabase even if LangGraph is selected for workflow orchestration.
+
+The proposed transparent scoring rule is:
+
+- Attempt score: `correct answers / 7 × 100`.
+- First attempt mastery: the attempt score.
+- Later mastery: `0.60 × latest attempt score + 0.40 × previous mastery`, rounded to a whole percentage.
+- Foundation (`0–49`): four easy and three medium questions.
+- Developing (`50–79`): two easy, four medium and one hard question.
+- Strong (`80–100`): one easy, three medium and three hard questions.
+
+This is a simple product heuristic, not a psychometrically validated measure. The UI must call it “mastery score,” explain the weighting, and avoid presenting it as an academic grade.
+
+### Cost and Latency
+
+Generate all seven questions in one bounded model request after one topic embedding/search. Submission is graded against the validated answer key in application code and requires no model call. This creates predictable provider usage per attempt and avoids seven sequential generation calls. If generation or validation fails, no attempt or mastery change is stored.
+
+### Grounding and Quality Risks
+
+- A topic name may retrieve insufficient or overly narrow evidence. In that case, quiz creation must fail clearly rather than use model knowledge.
+- A structurally valid MCQ can still be ambiguous or unsupported. The evaluation set must include human review of the question, answer, explanation and citation together.
+- Fresh generation may produce semantically similar questions across separate attempts. Cross-attempt deduplication is excluded because summary-only history intentionally does not retain question text.
+- Difficulty labels are model instructions rather than calibrated item-response measurements. Release testing must verify that the three mixes are recognizably different without claiming formal calibration.
+
+### Identity and Privacy
+
+The existing server uses a secret Supabase credential and performs authorization before database operations. Supabase documents that service-role/secret access bypasses Row Level Security, so every new database function must continue to enforce ownership in server code and revoke browser-role access. Student email must never enter embedding or generation requests.
+
+The smallest explicit retention rule is manual course-end deletion: quiz summaries, mastery and institutional email remain until an admin deletes that student's quiz profile. The dashboard must provide that deletion action and operations documentation must require it at course end. Automatic scheduled retention is deferred because the application has no course calendar or background worker.
+
+### Recommendation Feeding G3/G4
+
+- Preserve the existing Gemini embedding, pgvector retrieval and AI STAR generation services.
+- Store mastery and summary history in Supabase; do not use agent memory as the source of truth.
+- Compare a direct structured workflow against LangChain/LangGraph before adding dependencies.
+- Use one model call per quiz, one bounded repair attempt, deterministic grading and an atomic mastery update.
+- Keep question text and selected answers only in the active Streamlit session/results view; persist summary data only.
+- Keep all quiz tables and functions inaccessible to browser roles; the Streamlit server remains the authorization boundary.
+
+### Version 2 Sources
+
+- [LangChain: Structured output](https://docs.langchain.com/oss/python/langchain/structured-output)
+- [LangChain: Agents](https://docs.langchain.com/oss/python/langchain/agents)
+- [LangGraph: Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [Supabase: API keys and service-role behavior](https://supabase.com/docs/guides/getting-started/api-keys)
+- [Supabase: Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
+- [Supabase: Database function privileges](https://supabase.com/docs/guides/database/functions)
 

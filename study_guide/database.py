@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from typing import Any
+import unicodedata
+from uuid import UUID
 
 from supabase import Client, create_client
 
@@ -428,3 +430,199 @@ def delete_thread(client: Any, user_key: str, thread_id: str) -> None:
         ).execute()
     except Exception as exc:
         raise DatabaseError("Chat could not be deleted") from exc
+
+
+def list_quiz_topics(client: Any, *, active_only: bool = True) -> list[dict[str, Any]]:
+    try:
+        query = client.table("quiz_topics").select("id,name,active,created_at,updated_at")
+        if active_only:
+            query = query.eq("active", True)
+        return _data(query.order("name").execute()) or []
+    except Exception as exc:
+        raise DatabaseError("Quiz topics could not be loaded") from exc
+
+
+def _quiz_topic_name(name: str) -> str:
+    name = name.strip() if isinstance(name, str) else ""
+    if not name or len(name) > 100 or any(
+        unicodedata.category(character).startswith("C") for character in name
+    ):
+        raise DatabaseError("Enter a valid topic name")
+    return name
+
+
+def create_quiz_topic(client: Any, name: str) -> None:
+    try:
+        client.table("quiz_topics").insert({"name": _quiz_topic_name(name)}).execute()
+    except DatabaseError:
+        raise
+    except Exception as exc:
+        raise DatabaseError("Quiz topic could not be created. It may already exist.") from exc
+
+
+def update_quiz_topic(
+    client: Any, topic_id: str, *, name: str | None = None, active: bool | None = None
+) -> None:
+    values: dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if name is not None:
+        values["name"] = _quiz_topic_name(name)
+    if active is not None:
+        values["active"] = active
+    if len(values) == 1:
+        return
+    try:
+        UUID(topic_id)
+        client.table("quiz_topics").update(values).eq("id", topic_id).execute()
+    except (ValueError, TypeError) as exc:
+        raise DatabaseError("Quiz topic could not be updated") from exc
+    except Exception as exc:
+        raise DatabaseError("Quiz topic could not be updated. The name may already exist.") from exc
+
+
+def get_topic_mastery(client: Any, user_key: str, topic_id: str) -> int | None:
+    if not user_key:
+        raise DatabaseError("Quiz progress could not be loaded")
+    try:
+        UUID(topic_id)
+        rows = _data(
+            client.table("topic_mastery")
+            .select("mastery_score")
+            .eq("user_key", user_key)
+            .eq("topic_id", topic_id)
+            .limit(1)
+            .execute()
+        ) or []
+        return int(rows[0]["mastery_score"]) if rows else None
+    except (ValueError, TypeError) as exc:
+        raise DatabaseError("Quiz progress could not be loaded") from exc
+    except Exception as exc:
+        raise DatabaseError("Quiz progress could not be loaded") from exc
+
+
+def _quiz_rows_with_topics(
+    client: Any,
+    table: str,
+    columns: str,
+    *,
+    user_key: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    query = client.table(table).select(columns).order("updated_at" if table == "topic_mastery" else "completed_at", desc=True)
+    if user_key is not None:
+        query = query.eq("user_key", user_key)
+    rows = _data(query.limit(limit).execute()) or []
+    topic_ids = list({row["topic_id"] for row in rows})
+    topics = (
+        _data(client.table("quiz_topics").select("id,name").in_("id", topic_ids).execute())
+        if topic_ids
+        else []
+    ) or []
+    names = {row["id"]: row["name"] for row in topics}
+    for row in rows:
+        row["topic"] = names.get(row["topic_id"], "Unavailable topic")
+    return rows
+
+
+def list_student_quiz_progress(client: Any, user_key: str) -> list[dict[str, Any]]:
+    if not user_key:
+        raise DatabaseError("Quiz progress could not be loaded")
+    try:
+        return _quiz_rows_with_topics(
+            client,
+            "topic_mastery",
+            "topic_id,mastery_score,attempt_count,latest_score,updated_at",
+            user_key=user_key,
+        )
+    except Exception as exc:
+        raise DatabaseError("Quiz progress could not be loaded") from exc
+
+
+def list_student_quiz_attempts(client: Any, user_key: str) -> list[dict[str, Any]]:
+    if not user_key:
+        raise DatabaseError("Quiz history could not be loaded")
+    try:
+        return _quiz_rows_with_topics(
+            client,
+            "quiz_attempts",
+            "topic_id,correct_count,score,mastery_before,mastery_after,difficulty_mix,completed_at",
+            user_key=user_key,
+        )
+    except Exception as exc:
+        raise DatabaseError("Quiz history could not be loaded") from exc
+
+
+def complete_quiz_attempt(
+    client: Any,
+    *,
+    attempt_id: str,
+    user_key: str,
+    email: str,
+    topic_id: str,
+    correct_count: int,
+    difficulty_mix: dict[str, int],
+) -> dict[str, Any]:
+    if (
+        not user_key
+        or not isinstance(email, str)
+        or email != email.strip().casefold()
+        or "@" not in email
+        or type(correct_count) is not int
+        or not 0 <= correct_count <= 7
+        or difficulty_mix.keys() != {"easy", "medium", "hard"}
+        or any(type(value) is not int or value < 0 for value in difficulty_mix.values())
+        or sum(difficulty_mix.values()) != 7
+    ):
+        raise DatabaseError("Quiz result could not be saved")
+    try:
+        UUID(attempt_id)
+        UUID(topic_id)
+        rows = _data(
+            client.rpc(
+                "complete_quiz_attempt",
+                {
+                    "p_attempt_id": attempt_id,
+                    "p_user_key": user_key,
+                    "p_email": email,
+                    "p_topic_id": topic_id,
+                    "p_correct_count": correct_count,
+                    "p_difficulty_mix": difficulty_mix,
+                },
+            ).execute()
+        ) or []
+        if not rows:
+            raise ValueError("missing quiz result")
+        return rows[0]
+    except Exception as exc:
+        raise DatabaseError("Quiz result could not be saved") from exc
+
+
+def list_admin_quiz_progress(client: Any) -> list[dict[str, Any]]:
+    try:
+        rows = _quiz_rows_with_topics(
+            client,
+            "topic_mastery",
+            "user_key,topic_id,mastery_score,attempt_count,latest_score,updated_at",
+            # shortcut: covers the planned class; use server-side email paging if topics grow.
+            limit=1_000,
+        )
+        user_keys = list({row["user_key"] for row in rows})
+        profiles = (
+            _data(client.table("quiz_profiles").select("user_key,email").in_("user_key", user_keys).execute())
+            if user_keys
+            else []
+        ) or []
+        emails = {row["user_key"]: row["email"] for row in profiles}
+        for row in rows:
+            row["email"] = emails.get(row["user_key"], "Unavailable")
+        return rows
+    except Exception as exc:
+        raise DatabaseError("Student quiz progress could not be loaded") from exc
+
+
+def delete_quiz_profile(client: Any, user_key: str) -> bool:
+    if not user_key:
+        raise DatabaseError("Quiz profile could not be deleted")
+    try:
+        return bool(_data(client.rpc("delete_quiz_profile", {"p_user_key": user_key}).execute()))
+    except Exception as exc:
+        raise DatabaseError("Quiz profile could not be deleted") from exc

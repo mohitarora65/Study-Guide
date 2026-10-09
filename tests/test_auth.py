@@ -32,6 +32,7 @@ def test_allows_verified_college_email(settings: Settings) -> None:
     identity = authenticate_claims(claims(), settings)
 
     assert not identity.is_admin
+    assert identity.email == "student@iiti.ac.in"
     assert len(identity.user_key) == 64
     assert "student" not in identity.user_key
 
@@ -40,6 +41,7 @@ def test_domain_and_admin_comparison_are_case_insensitive(settings: Settings) ->
     identity = authenticate_claims(claims(email="ADMIN@IITI.AC.IN"), settings)
 
     assert identity.is_admin
+    assert identity.email == "admin@iiti.ac.in"
 
 
 @pytest.mark.parametrize(

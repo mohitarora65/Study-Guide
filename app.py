@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
@@ -15,11 +17,20 @@ from study_guide.database import (
     DatabaseError,
     append_turn,
     build_client,
+    complete_quiz_attempt,
+    create_quiz_topic,
     create_thread,
+    delete_quiz_profile,
     delete_thread,
+    get_topic_mastery,
+    list_admin_quiz_progress,
     list_documents,
+    list_quiz_topics,
+    list_student_quiz_attempts,
+    list_student_quiz_progress,
     list_thread_messages,
     list_threads,
+    update_quiz_topic,
 )
 from study_guide.ingestion import (
     IngestionError,
@@ -28,6 +39,7 @@ from study_guide.ingestion import (
     reindex_document,
     retry_failed_document,
 )
+from study_guide.quizzing import QuizError, generate_quiz, grade_quiz
 
 
 def render_configuration_error() -> None:
@@ -45,14 +57,27 @@ def render_sign_in() -> None:
     st.write("Only verified IIT Indore (`iiti.ac.in`) Google accounts are allowed.")
     st.button("Sign in with Google", type="primary", on_click=st.login)
     st.write(
-        "Your identity is used for access control. It is not sent to the AI provider."
+        "Your identity is used for access control and quiz progress. Your email is visible "
+        "to administrators but is not sent to the AI provider."
     )
+
+
+def _clear_quiz_session() -> None:
+    for key in ("active_quiz", "active_quiz_topic_id", "quiz_result"):
+        st.session_state.pop(key, None)
+    for number in range(1, 8):
+        st.session_state.pop(f"quiz-answer-{number}", None)
+
+
+def _log_out() -> None:
+    _clear_quiz_session()
+    st.logout()
 
 
 def render_account_controls(identity: Identity) -> None:
     role = "Admin" if identity.is_admin else "Student"
     st.sidebar.write(f"Signed in as {role}")
-    st.sidebar.button("Log out", on_click=st.logout)
+    st.sidebar.button("Log out", on_click=_log_out)
 
 
 def render_study_page(settings: Settings, identity: Identity) -> None:
@@ -163,6 +188,241 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
             st.error(str(exc))
         except Exception:
             st.error("The response could not be prepared. Please try again.")
+
+
+def render_quiz_page(settings: Settings, identity: Identity) -> None:
+    st.title("Adaptive quiz")
+    client = build_client(settings)
+    try:
+        topics = list_quiz_topics(client)
+    except DatabaseError as exc:
+        st.error(str(exc))
+        return
+    if not topics:
+        st.info("No quiz topics are available yet. Ask an administrator to add one.")
+        return
+
+    topic_by_id = {topic["id"]: topic for topic in topics}
+    selected_topic_id = st.selectbox(
+        "Topic",
+        list(topic_by_id),
+        format_func=lambda topic_id: topic_by_id[topic_id]["name"],
+        disabled="active_quiz" in st.session_state,
+    )
+    if st.button(
+        "Generate 7-question quiz",
+        type="primary",
+        disabled="active_quiz" in st.session_state,
+    ):
+        try:
+            _clear_quiz_session()
+            mastery = get_topic_mastery(client, identity.user_key, selected_topic_id)
+            with st.spinner("Preparing a fresh quiz from the course material…"):
+                st.session_state.active_quiz = generate_quiz(
+                    topic_by_id[selected_topic_id]["name"],
+                    mastery_before=mastery,
+                    gemini_api_key=settings.gemini_api_key,
+                    ai_star_api_key=settings.ai_star_api_key,
+                    database_client=client,
+                    user_key=identity.user_key,
+                )
+            st.session_state.active_quiz_topic_id = selected_topic_id
+            st.session_state.pop("quiz_result", None)
+            st.rerun()
+        except (DatabaseError, QuizError) as exc:
+            st.error(str(exc))
+
+    quiz = st.session_state.get("active_quiz")
+    if quiz is None:
+        return
+    if st.button("Discard quiz"):
+        _clear_quiz_session()
+        st.rerun()
+
+    st.subheader(quiz.topic)
+    st.caption(
+        "Difficulty: "
+        + ", ".join(f"{count} {level}" for level, count in quiz.difficulty_mix.items() if count)
+    )
+    result = st.session_state.get("quiz_result")
+    if result:
+        st.success(
+            f"Score: {result['correct_count']}/7 ({result['score']}%) · "
+            f"Topic mastery: {result['mastery_after']}%"
+        )
+        for number, (question, answer) in enumerate(
+            zip(quiz.questions, result["answers"], strict=True), start=1
+        ):
+            st.markdown(f"**{number}. {question.prompt}**")
+            if answer == question.correct_index:
+                st.write(f"Correct: {question.options[question.correct_index]}")
+            else:
+                st.write(f"Your answer: {question.options[answer]}")
+                st.write(f"Correct answer: {question.options[question.correct_index]}")
+            st.write(question.explanation)
+            for citation in question.citations:
+                st.caption(f"{citation['display_name']} · PDF page {citation['page_number']}")
+        return
+
+    with st.form("quiz-answers"):
+        answers = [
+            st.radio(
+                f"{number}. {question.prompt}",
+                range(4),
+                index=None,
+                format_func=lambda option, question=question: question.options[option],
+                key=f"quiz-answer-{number}",
+            )
+            for number, question in enumerate(quiz.questions, start=1)
+        ]
+        submitted = st.form_submit_button("Submit all answers", type="primary")
+    if submitted:
+        if any(answer is None for answer in answers):
+            st.error("Answer all seven questions before submitting.")
+            return
+        try:
+            selected_answers = [int(answer) for answer in answers]
+            correct_count = grade_quiz(quiz, selected_answers)
+            saved = complete_quiz_attempt(
+                client,
+                attempt_id=str(uuid4()),
+                user_key=identity.user_key,
+                email=identity.email,
+                topic_id=st.session_state.active_quiz_topic_id,
+                correct_count=correct_count,
+                difficulty_mix=quiz.difficulty_mix,
+            )
+            st.session_state.quiz_result = {
+                **saved,
+                "correct_count": correct_count,
+                "answers": selected_answers,
+            }
+            st.rerun()
+        except (DatabaseError, QuizError) as exc:
+            st.error(str(exc))
+
+
+def render_quiz_progress_page(settings: Settings, identity: Identity) -> None:
+    st.title("Quiz progress")
+    client = build_client(settings)
+    try:
+        progress = list_student_quiz_progress(client, identity.user_key)
+        attempts = list_student_quiz_attempts(client, identity.user_key)
+    except DatabaseError as exc:
+        st.error(str(exc))
+        return
+    if not progress:
+        st.info("Complete a quiz to begin tracking topic mastery.")
+        return
+    st.subheader("Topic mastery")
+    st.dataframe(
+        [
+            {
+                "Topic": row["topic"],
+                "Mastery": f"{row['mastery_score']}%",
+                "Latest score": f"{row['latest_score']}%",
+                "Attempts": row["attempt_count"],
+            }
+            for row in progress
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+    st.subheader("Quiz summaries")
+    st.dataframe(
+        [
+            {
+                "Topic": row["topic"],
+                "Score": f"{row['correct_count']}/7 ({row['score']}%)",
+                "Mastery after": f"{row['mastery_after']}%",
+                "Completed": row["completed_at"],
+            }
+            for row in attempts
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def render_quiz_topics_page(settings: Settings) -> None:
+    st.title("Quiz topics")
+    client = build_client(settings)
+    with st.form("new-quiz-topic", clear_on_submit=True):
+        name = st.text_input("New topic name", max_chars=100)
+        add = st.form_submit_button("Add topic", type="primary")
+    if add:
+        try:
+            create_quiz_topic(client, name)
+            st.rerun()
+        except DatabaseError as exc:
+            st.error(str(exc))
+    try:
+        topics = list_quiz_topics(client, active_only=False)
+    except DatabaseError as exc:
+        st.error(str(exc))
+        return
+    for topic in topics:
+        with st.form(f"topic-{topic['id']}"):
+            updated_name = st.text_input("Topic", value=topic["name"], key=f"topic-name-{topic['id']}")
+            active = st.checkbox("Available to students", value=topic["active"], key=f"topic-active-{topic['id']}")
+            if st.form_submit_button("Save"):
+                try:
+                    update_quiz_topic(client, topic["id"], name=updated_name, active=active)
+                    st.rerun()
+                except DatabaseError as exc:
+                    st.error(str(exc))
+
+
+def render_admin_quiz_progress_page(settings: Settings) -> None:
+    st.title("Student quiz progress")
+    client = build_client(settings)
+    try:
+        rows = list_admin_quiz_progress(client)
+    except DatabaseError as exc:
+        st.error(str(exc))
+        return
+    query = st.text_input("Filter by institutional email").strip().casefold()
+    visible = [row for row in rows if query in row["email"].casefold()]
+    if visible:
+        st.dataframe(
+            [
+                {
+                    "Email": row["email"],
+                    "Topic": row["topic"],
+                    "Mastery": f"{row['mastery_score']}%",
+                    "Latest score": f"{row['latest_score']}%",
+                    "Attempts": row["attempt_count"],
+                    "Updated": row["updated_at"],
+                }
+                for row in visible
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    else:
+        st.info("No matching quiz progress.")
+    profiles = {row["user_key"]: row["email"] for row in rows}
+    if profiles:
+        selected_user = st.selectbox(
+            "Student profile to delete",
+            list(profiles),
+            format_func=profiles.get,
+        )
+        if st.button("Delete quiz profile…"):
+            st.session_state.confirm_quiz_profile_delete = selected_user
+        if st.session_state.get("confirm_quiz_profile_delete") == selected_user:
+            st.warning(f"Permanently delete all quiz progress for {profiles[selected_user]}?")
+            confirm, cancel = st.columns(2)
+            if confirm.button("Confirm profile deletion", type="primary"):
+                try:
+                    delete_quiz_profile(client, selected_user)
+                    st.session_state.pop("confirm_quiz_profile_delete", None)
+                    st.rerun()
+                except DatabaseError as exc:
+                    st.error(str(exc))
+            if cancel.button("Cancel"):
+                st.session_state.pop("confirm_quiz_profile_delete", None)
+                st.rerun()
 
 
 def render_documents_page(settings: Settings) -> None:
@@ -341,7 +601,17 @@ def render_authenticated_app(settings: Settings, identity: Identity) -> None:
                 title="Study",
                 url_path="study",
                 default=True,
-            )
+            ),
+            st.Page(
+                lambda: render_quiz_page(settings, identity),
+                title="Adaptive quiz",
+                url_path="quiz",
+            ),
+            st.Page(
+                lambda: render_quiz_progress_page(settings, identity),
+                title="Quiz progress",
+                url_path="progress",
+            ),
         ]
     }
     if identity.is_admin:
@@ -350,7 +620,17 @@ def render_authenticated_app(settings: Settings, identity: Identity) -> None:
                 lambda: render_documents_page(settings),
                 title="Documents",
                 url_path="documents",
-            )
+            ),
+            st.Page(
+                lambda: render_quiz_topics_page(settings),
+                title="Quiz topics",
+                url_path="quiz-topics",
+            ),
+            st.Page(
+                lambda: render_admin_quiz_progress_page(settings),
+                title="Student progress",
+                url_path="student-progress",
+            ),
         ]
     st.navigation(pages).run()
 

@@ -4,7 +4,21 @@
 **Project root:** `/Users/mohitarora/New projects/Study Guide`  
 **State:** New project  
 **Mode:** Learning / Production with a tightly scoped Version 1  
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-10
+
+## Version 2 Change Gates — Adaptive Quiz Agent
+
+| Gate | Status | Deliverables | Evidence / next action |
+|---|---|---|---|
+| V2-G0 — Change discovery | COMPLETE | User decisions recorded in `PROJECT_BRIEF.md` | MCQ-only; seven fresh questions; topic selected by student from admin-managed names; semantic retrieval; feedback after submission; rolling mastery; summary history; admin visibility by institutional email. |
+| V2-G1 — Change brief | APPROVED | `PROJECT_BRIEF.md` — Version 2 proposal | User replied “yes” on 2026-10-09. |
+| V2-G2 — Research and PRD update | APPROVED | `RESEARCH.md`, `PRD.md` | User replied “yes” on 2026-10-09, approving the requirements, mastery formula and manual course-end deletion policy. |
+| V2-G3 — Stack decision update | APPROVED | `TECH_STACK_DECISION.md` | User selected Option C (“c”) on 2026-10-10: LangChain + LangGraph. |
+| V2-G4 — Architecture and design update | APPROVED | `ARCHITECTURE.md`, `DESIGN.md` | User replied “approve” on 2026-10-10. |
+| V2-G5 — Roadmap update | APPROVED | `ROADMAP.md` | User said “reduce tokens rest is fine” on 2026-10-10; live evaluation reduced to three quiz generations. |
+| V2-G6 — Implementation phase | COMPLETE — USER APPROVED | `PHASE_PLAN_V2.1.md` | User replied “approve v2.1” on 2026-10-10. Implementation and migration signed off; full live quiz provider reliability remains in V2.2. |
+| V2-G6 — Evaluation/release-readiness phase | PARTIAL — KEPT LOCAL BY USER | `PHASE_PLAN_V2.2.md` | All three capped generations hit the provider output-length limit; no follow-up generation was requested. The later deployment request is handled as a separate proposed phase in `DEPLOYMENT_PLAN_V2.md`. |
+| V2-G7 — Controlled deployment | APPROVED — WAITING FOR USER PUSH | `DEPLOYMENT_PLAN_V2.md` | User approved the plan and confirmed production Supabase ref `kjxixskoeihbitcohhuo`; expected schema/security are already present, so migration was not re-run. Verify the Community Cloud source branch, then user reviews and pushes; Git operations remain user-controlled. |
 
 ## Approval Gates
 
@@ -38,6 +52,7 @@ Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `
 ## Current Status
 
 - Planning documents created: `PROJECT_BRIEF.md`, `RESEARCH.md`, `PRD.md`, `TECH_STACK_DECISION.md`, `ARCHITECTURE.md`, `DESIGN.md`, `ROADMAP.md`, `PHASE_PLAN.md`, `PROGRESS.md`.
+- V2.1 adaptive quiz is implemented locally: admin topics, seven grounded MCQs, local grading, rolling mastery, summary-only history, student progress and admin email lookup/deletion. Migration `003_adaptive_quiz.sql` is applied to the confirmed development project. The feature is awaiting user sign-off and is not deployed.
 - V1.1 application foundation, configuration boundary, authentication policy, initial schema, tests and README: implemented locally.
 - Project-local `.venv`: created with installed Python 3.13 because Python 3.12 is not installed locally; code remains compatible with the approved Python 3.12 deployment target.
 - External services and deployment: Google OAuth consent/login was verified. The approved additive migration was applied to Supabase project `kjxixskoeihbitcohhuo`; no provider configuration or deployment was performed.
@@ -53,6 +68,30 @@ Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `
 - Live Gemini and Supabase checks pass: `gemini-embedding-2` returned finite 768-dimensional vectors; `pdfs/lA notes.pdf` is ready with one active version, 80 pages, 81 chunks and one private 626,231-byte source object.
 - A known basis/dimension query retrieved the relevant section on PDF page 25 as the top match with 0.8687 cosine similarity and stored provenance. A duplicate ingestion created no extra document, version, run or chunks.
 - The authenticated Admin page rendered the ready document, page/character/model metadata and enabled re-index/delete controls. Automated browser file selection was **NOT TESTED** because Brave requires broadening the ChatGPT extension's local-file permission; that permission was deliberately left unchanged. The same ingestion entry point passed end-to-end outside the browser.
+
+## V2.1 Adaptive Quiz Execution Report — 2026-10-10
+
+**Phase status:** COMPLETE — user approved on 2026-10-10. V2.2 remains the next planned phase for live quiz quality/reliability evaluation; no deployment was authorized.
+
+- Added LangChain/LangGraph pins, normalized verified email identity, strict quiz-domain validation and a deterministic retrieve/generate/validate/one-repair graph with no graph persistence or model-controlled writes.
+- Added private quiz topics/profiles/mastery/attempt-summary tables. Browser roles are revoked; atomic completion is idempotent and profile deletion cascades only quiz data.
+- Synthetic development-Supabase lifecycle passed: first score `5/7` produced mastery `71`; second `7/7` produced `88`; replaying the second attempt did not increment the count; student/admin reads matched; cleanup removed the exact synthetic profile/topic.
+- The first database lifecycle run exposed an ambiguous PL/pgSQL column reference. It was corrected with an explicit table alias, applied, regression-asserted and retested successfully.
+- Three-call AI STAR cap respected: one small LangChain JSON compatibility call passed; two complete quiz attempts ended in the safe provider-error path after long waits. No identity was included. Evidence/output bounds were reduced for future attempts, but the cap prevented another live call.
+- Deterministic tests cover exact mixes, scoring/mastery, fabricated citations, one repair, insufficient evidence, identity-free payloads, summary-only persistence and the full Streamlit generate/answer/submit/result flow.
+- Verification: 91 tests pass; compileall and `pip check` pass; local Streamlit health returned HTTP 200 in 1.3 ms; signed-out page shows the quiz-email disclosure. Authenticated browser navigation and live full-quiz quality/latency remain unverified.
+- No Git mutation or deployment occurred.
+
+## V2.2 Evaluation Report — 2026-10-10
+
+**Status:** PARTIAL — KEPT LOCAL BY USER. The three-call phase cap was respected, but provider truncation prevented every approved quiz set from completing. The user declined a follow-up provider test. A later deployment request is recorded separately in proposed `DEPLOYMENT_PLAN_V2.md`.
+
+- All three AI STAR responses ended in `LengthFinishReasonError` with HTTP 200 at the configured output-token limit (1,800 at evaluation time); latencies were 11.85 s, 13.27 s and 10.32 s. No retry or repair call was made. The limit was raised to 3,500 and covered by tests, but that fix is not live-verified.
+- The three-question matrix produced zero complete sets; no question-quality review or release-readiness claim is possible. Failure metadata is in ignored `evaluation/quiz_results/v22_20261010.json`.
+- 97 tests pass; compilation, `pip check`, `git diff --check` and local Streamlit health check pass. Streamlit UI tests cover student-only navigation, student quiz submission, student mastery/history, admin email filtering and topic creation. Deprecated quiz table sizing arguments were updated. Synthetic database idempotency/admin lookup/mastery and exact-data cleanup passed.
+- The real browser showed the signed-out page; authenticated browser flows and quiz-specific accessibility remain untested. No V2 deployment or Git operation occurred; do not deploy V2 based on this evaluation.
+
+The user later requested deployment. This request does not change V2.2's partial evaluation result; deployment prerequisites and separate production migration approval are tracked in `DEPLOYMENT_PLAN_V2.md`.
 
 ## V1.2 Execution Report
 

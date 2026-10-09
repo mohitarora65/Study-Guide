@@ -1,14 +1,14 @@
 # Roadmap — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user replied “yes” on 2026-10-09  
-**Date:** 2026-10-09  
-**Versions:** Version 1 pilot, then optional Version 2 measured improvements only  
+**Status:** Version 1 APPROVED; Version 2 APPROVED — user said “reduce tokens rest is fine” on 2026-10-10
+**Date:** 2026-10-10
+**Versions:** Version 1 deployed study guide; Version 2 adaptive quiz
 
 ## 1. Delivery Strategy
 
 Build the smallest secure vertical slices in dependency order. Each phase needs one whole-phase approval, then runs end-to-end through implementation, tests, fixes and documentation before review. Git staging, commits and pushes remain user-controlled.
 
-Version 1 ends with a controlled student pilot candidate and evidence against the PRD. Version 2 exists only for measured pilot fixes or already-approved polish; it is not a container for new features.
+Version 1 delivered the grounded study guide. Version 2 is the separately planned adaptive-quiz feature approved through V2-G1–G4. No third product version is planned.
 
 ## 2. Dependency Order
 
@@ -23,7 +23,9 @@ V1.4 Evaluation and release hardening
         ↓
 V1.5 Controlled deployment and final audit
         ↓
-Optional V2.1 measured pilot improvements
+V2.1 Adaptive quiz implementation
+        ↓
+V2.2 Quiz evaluation, rollout and audit
         ↓
 Post-completion interview artifacts
 ```
@@ -122,19 +124,48 @@ Post-completion interview artifacts
 
 **Exit criteria:** Deployment evidence is recorded; no secret is exposed; critical flows work at the real URL; rollback is understood; final audit categories are PASS/FAIL/NOT TESTED/N/A with evidence; user explicitly approves the release.
 
-## 4. Optional Version 2
+## 4. Version 2 — Adaptive Quiz
 
-### Phase V2.1 — Measured Pilot Improvements
+### Phase V2.1 — Complete Adaptive Quiz Implementation
 
-This phase exists only if pilot evidence justifies it. Allowed work is limited to:
+**User-visible outcome:** An authenticated student can choose an admin-managed topic, complete seven fresh PDF-grounded MCQs, receive delayed cited feedback and build a rolling mastery score; an admin can manage topics and view/delete student progress by institutional email.
 
-- fixing observed reliability, retrieval, citation, usability or accessibility defects;
-- tuning capacity/cost within the approved architecture;
-- small interface polish already inside the PRD.
+**Deliverables:**
 
-New courses, OCR, quizzes, analytics, web search, mobile apps, agents and LangChain orchestration remain out of scope and require a separately approved scope/architecture revision.
+- verify and pin compatible `langchain`, `langchain-openai` and `langgraph` packages;
+- run a bounded synthetic AI STAR compatibility probe through LangChain custom-base-URL JSON mode before committing to the adapter;
+- add the deterministic LangGraph generation/validation/repair workflow without a checkpointer or model-controlled database tools;
+- add the quiz topic, profile, attempt-summary and mastery migration with denied browser access and transactional/idempotent completion/deletion functions;
+- extend verified identity with normalized institutional email while excluding it from provider payloads and logs;
+- add quiz retrieval, exact seven-MCQ validation, deterministic grading and rolling-mastery logic;
+- add student Quiz/Progress and admin Topics/Student Progress pages;
+- add focused unit, database-contract, graph-branch, Streamlit and Version 1 regression coverage;
+- apply the additive migration only to the already confirmed development Supabase project after the V2.1 phase approval explicitly includes that write;
+- complete authenticated local smoke checks and update README, operations and progress records.
 
-**Exit criteria:** Each selected issue has reproduction evidence, a focused fix, regression coverage and measured before/after results; final audit and release approval are repeated where affected.
+**Exit criteria:** The AI STAR LangChain adapter works or the phase stops with evidence; exactly seven grounded MCQs are enforced; invalid/fabricated outputs create no attempt; grading and mastery are deterministic; duplicate submission is idempotent; student isolation/admin authorization pass; email is absent from AI requests/logs; the full regression suite passes; the approved development migration and local critical flow are verified.
+
+**Out of scope:** automated retention jobs, full-question history, question-bank editing, short-answer grading, web search, leaderboards, exports, multi-course support and deployment to a new hosting service.
+
+### Phase V2.2 — Quiz Evaluation, Production Rollout and Final Audit
+
+**User-visible outcome:** The live Streamlit application exposes the approved quiz workflow with reviewed question quality, documented operational limits and a rollback path.
+
+**Deliverables:**
+
+- create a compact, admin/TA-approved quiz evaluation matrix with three representative topics assigned across the three mastery bands;
+- generate and manually review one seven-question set for each topic/band assignment (three generations, 21 MCQs total) for question clarity, correct option, explanation, difficulty and citation support;
+- exercise insufficient-topic evidence, provider failure, duplicate submission, session loss and admin deletion behavior;
+- measure quiz-generation latency and a small concurrent burst without claiming class-wide capacity;
+- complete privacy/security/accessibility review for stored emails and both quiz interfaces;
+- update operations with migration rollback, quiz-data deletion and incident steps;
+- provide precise user-run Git commit/push instructions; Streamlit deployment updates only after the user's push;
+- verify the deployed student and admin critical paths using test records and remove those records afterward;
+- complete the Version 2 requirement-to-evidence audit and request release sign-off.
+
+**Exit criteria:** Every sampled MCQ is reviewed or any failure is fixed/retested; deployed login, topic, quiz, results, progress, admin analytics and deletion work; no critical privacy/security finding remains; provider usage/latency and known limits are recorded; rollback is documented; the user explicitly approves the Version 2 release.
+
+**User dependencies:** The admin provides/approves the initial topic names and manually reviews the evaluation matrix. The user performs Git staging, commit and push. Deployment and deletion of live test records remain separately visible actions within the approved phase.
 
 ## 5. Post-Completion Interview Artifacts
 
@@ -167,12 +198,15 @@ Before approving V1.1, confirm the actual selectable Codex model and reasoning l
 | V1.3 grounded assistant | V1 | High | GPT-6.1 Sol | High for citation/security logic | 10–18 h | 3–5 | 2–4 | Medium-low |
 | V1.4 evaluation/hardening | V1 | High | GPT-6.1 Sol; Astra only if available and justified | High/Extra High for final review | 10–18 h plus TA judging | 3–5 | 2–4 | Medium-low |
 | V1.5 deployment/audit | V1 | High | GPT-6.1 Sol | Medium→High | 5–9 h plus approvals | 2–3 | 1–2 | Medium |
-| V2.1 measured fixes | V2 optional | Unknown | Luna for focused fixes; Sol for cross-cutting issues | Low→High by defect | 4–16 h | 1–4 | 1–3 | Low until pilot |
+| V2.1 adaptive quiz implementation | V2 | High | Current Codex GPT-5 session; no fallback verified | High for identity/schema/idempotency, medium for UI | 10–16 h | 3–5 | 2–4 estimated | Medium-low |
+| V2.2 evaluation/rollout/audit | V2 | High | Current Codex GPT-5 session; no fallback verified | High for review/security, medium for rollout | 6–10 h plus TA review | 2–3 | 1–2 estimated | Medium-low |
 | Interview artifacts | Post-completion | Medium | Luna/Sol for generation; Sol/Astra for verification | Medium→High | 8–14 h plus template choice | 2–4 | 1–3 | Medium |
 
 \*Recommendations follow official guidance, not proof of account access. Use the lightest actually available model/effort that passes the phase checks; record the selected model and visible usage after every phase.
 
-**Estimated mandatory V1 total:** 38–68 human-equivalent hours, 12–20 chat/context sessions and 8–15 five-hour usage windows. These are separate measures, not interchangeable capacity promises. Add 8–14 hours and 1–3 windows for post-completion interview artifacts. V2 is excluded from the mandatory total.
+**Estimated Version 2 total:** 16–26 human-equivalent hours, 5–8 chat/context sessions and approximately 3–6 five-hour usage windows. The client does not expose actual Codex token use or remaining allowance, so these are planning ranges rather than quota promises. Add 8–14 hours and 1–3 windows for post-completion interview artifacts.
+
+**Application-provider estimate:** V2.1 allows at most three AI STAR calls: one tiny adapter probe, one complete seven-question smoke set and one retry only if needed. V2.2 adds three successful seven-question generations, one for each representative topic/mastery-band assignment. Deterministic fixtures cover every remaining branch without provider calls. A rough combined range is 30,000–80,000 AI STAR input/output tokens, with low confidence until the first seven-question payload is measured. Gemini adds one small topic embedding per quiz generation. Exact deductions and monetary cost remain unknown and must be recorded where available.
 
 API token/spend estimates for Codex are **unknown** because this workspace cannot see account billing or token telemetry. Gemini usage will be measured from actual ingestion and question traces during development; no safe total can be inferred from the reported 10-million-token allowance alone.
 
@@ -182,9 +216,9 @@ Before each implementation phase, present one compact plan covering scope, files
 
 After each accepted phase, suggest user-run commands scoped to the project files: `git status`, `git diff --stat`, explicit `git add <paths>`, `git diff --cached`, and a phase-specific commit. The AI does not stage, commit, branch, merge, rebase or push.
 
-## 8. G5 Approval Effect
+## 8. V2-G5 Approval Effect
 
-Approving this roadmap authorizes preparation of the V1.1 phase plan only. It does not authorize source-code creation, package installation, external account changes, deployment, spending, or Git mutations. V1.1 implementation begins only after separate G6 whole-phase approval.
+Approving this roadmap authorizes preparation of the V2.1 whole-phase plan only. It does not yet authorize dependency installation, source changes, the Supabase migration, provider calls, deployment or Git mutations. V2.1 implementation begins only after separate V2-G6 whole-phase approval that identifies those actions.
 
 ## 9. Model Guidance Sources Checked on 2026-10-09
 

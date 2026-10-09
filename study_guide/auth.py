@@ -15,6 +15,7 @@ class IdentityError(ValueError):
 @dataclass(frozen=True)
 class Identity:
     user_key: str
+    email: str
     is_admin: bool
 
 
@@ -49,4 +50,8 @@ def authenticate_claims(
         settings.user_key_secret.encode(), message, hashlib.sha256
     ).hexdigest()
 
-    return Identity(user_key=user_key, is_admin=email in settings.admin_emails)
+    return Identity(
+        user_key=user_key,
+        email=email,
+        is_admin=email in settings.admin_emails,
+    )

@@ -1,7 +1,7 @@
 # Product Requirements Document — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user replied “yes” on 2026-10-09  
-**Date:** 2026-10-09  
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Date:** 2026-10-09
 **Version:** 1.0 proposal
 
 ## 1. Product Objective
@@ -209,3 +209,135 @@ G4 must define:
 ## 10. Release Definition
 
 Version 1 is ready for a controlled student pilot only when the approved requirements are implemented, the acceptance tests are run with real course material, no critical security issue remains, free-tier limits are documented, and the user explicitly approves release and deployment.
+
+## 11. Version 2 Proposal — Adaptive Quiz Agent
+
+**Status:** APPROVED — user replied “yes” on 2026-10-09
+**Scope:** Add one PDF-grounded adaptive MCQ workflow without changing the Version 1 study assistant.
+
+### 11.1 Roles
+
+#### Student
+
+- Chooses an active admin-managed topic.
+- Starts a seven-question MCQ attempt adapted from prior mastery for that topic.
+- Answers all questions before seeing results.
+- Sees score, mastery, correct answers, explanations and document/page citations after submission.
+- Sees their own summary history and topic mastery only.
+
+#### Admin
+
+- Creates, renames, activates and deactivates topic names.
+- Views student-level summary history and mastery by institutional email.
+- Deletes a student's quiz profile, attempt summaries and mastery at course end or when access should be removed.
+- Does not see full generated questions or selected answers after the student's results session ends.
+
+### 11.2 Primary Flows
+
+#### Topic Management
+
+1. Admin enters a unique topic name.
+2. The server validates and stores the normalized name.
+3. Active topics appear in the student quiz selector.
+4. Deactivation prevents new attempts while preserving existing summary history.
+
+#### Quiz Creation
+
+1. Student selects an active topic and starts a quiz.
+2. The server loads that student's current mastery for the topic.
+3. The mastery band selects the required easy/medium/hard mix.
+4. The topic name is embedded and relevant active PDF chunks are retrieved semantically.
+5. If evidence is insufficient, creation stops with a clear message and stores nothing.
+6. The generator receives the topic, required difficulty mix and bounded retrieved excerpts.
+7. The server validates exactly seven grounded MCQs and performs at most one repair attempt.
+8. The complete quiz is kept in the authenticated Streamlit session until submission or session loss.
+
+#### Submission and Mastery Update
+
+1. Student submits answers for all seven questions.
+2. The server grades locally using the validated answer key.
+3. The database atomically stores one summary row and updates the student's topic mastery.
+4. The results page shows all seven outcomes, explanations and citations.
+5. No second AI call occurs during grading.
+
+### 11.3 Functional Requirements
+
+#### Topics
+
+- **QUIZ-TOPIC-01:** Only configured admins can create, rename, activate or deactivate topics.
+- **QUIZ-TOPIC-02:** Topic names must be trimmed, bounded, case-insensitively unique and free of control characters.
+- **QUIZ-TOPIC-03:** Students can start quizzes only for active topics.
+- **QUIZ-TOPIC-04:** Topic lookup uses semantic retrieval over active approved document chunks; no page ranges are stored.
+
+#### Quiz Generation
+
+- **QUIZ-GEN-01:** Each attempt contains exactly seven multiple-choice questions generated together in one provider request.
+- **QUIZ-GEN-02:** Each question has exactly four distinct options and exactly one correct option.
+- **QUIZ-GEN-03:** Each question records one of `easy`, `medium` or `hard`, an explanation and at least one retrieved chunk ID.
+- **QUIZ-GEN-04:** Every cited chunk ID must belong to the retrieved evidence supplied for that generation.
+- **QUIZ-GEN-05:** Questions must be unique within an attempt after normalization.
+- **QUIZ-GEN-06:** Evidence and generated fields are untrusted; lengths, types, option indexes, citations and duplicate questions must be validated server-side.
+- **QUIZ-GEN-07:** A malformed set gets at most one bounded repair call. If the complete set still fails, the student sees a safe retry message and no attempt is stored.
+- **QUIZ-GEN-08:** If topic evidence is below the existing retrieval threshold, no quiz is generated.
+- **QUIZ-GEN-09:** Fresh question text is generated for every attempt; cross-attempt uniqueness is not guaranteed.
+
+#### Grading and Feedback
+
+- **QUIZ-GRADE-01:** All seven questions must be answered before submission.
+- **QUIZ-GRADE-02:** The server grades deterministically from the validated answer key without another provider call.
+- **QUIZ-GRADE-03:** Feedback remains hidden until successful submission.
+- **QUIZ-GRADE-04:** Results show score, correct option, selected option, explanation and document/page citations for every question.
+- **QUIZ-GRADE-05:** Repeated submission of the same in-session quiz must not create duplicate summaries or update mastery twice.
+
+#### Adaptation
+
+- **QUIZ-ADAPT-01:** Attempt score is `correct / 7 × 100`.
+- **QUIZ-ADAPT-02:** First-attempt mastery equals that attempt score.
+- **QUIZ-ADAPT-03:** Later mastery is `0.60 × latest score + 0.40 × previous mastery`, rounded to a whole percentage.
+- **QUIZ-ADAPT-04:** Mastery `0–49` requests four easy and three medium questions.
+- **QUIZ-ADAPT-05:** Mastery `50–79` requests two easy, four medium and one hard question.
+- **QUIZ-ADAPT-06:** Mastery `80–100` requests one easy, three medium and three hard questions.
+- **QUIZ-ADAPT-07:** The UI explains that mastery is a quiz-personalization indicator rather than an official course grade.
+
+#### Persistence and Analytics
+
+- **QUIZ-DATA-01:** Persist only student key, normalized institutional email, topic, correct count, score, mastery before/after, requested difficulty mix and completion timestamp.
+- **QUIZ-DATA-02:** Full question text, option text, correct answers, selected answers, explanations and citations are not stored after the active results session.
+- **QUIZ-DATA-03:** A student can read only their own mastery and summaries.
+- **QUIZ-DATA-04:** Only a configured admin can list student emails and class progress.
+- **QUIZ-DATA-05:** Email is never sent to the embedding or answer-generation provider and never written to application logs.
+- **QUIZ-DATA-06:** Admin deletion removes the student's stored email, attempt summaries and mastery atomically.
+- **QUIZ-DATA-07:** Operations documentation requires admin deletion at course end; automatic scheduled deletion is outside this proposal.
+
+### 11.4 Non-Functional Requirements
+
+- Existing question answering, citations, document ingestion and chat history must continue to work.
+- Quiz generation must use one embedding request, one retrieval and normally one generation request per attempt.
+- An invalid or failed generation must not modify mastery.
+- Quiz submission and mastery update must be transactional and idempotent.
+- All new tables must deny browser roles; protected access occurs through the authenticated Streamlit server.
+- Institutional email must be encrypted in transit, excluded from logs/provider prompts and visible only in the admin dashboard.
+- Controls and results must be keyboard usable and readable at mobile width.
+
+### 11.5 Acceptance Criteria
+
+- Admin can create an active topic and it appears in the student selector.
+- A topic with sufficient evidence produces exactly seven valid MCQs matching the required difficulty mix.
+- A topic without sufficient evidence produces no quiz and no stored attempt.
+- Invalid options, duplicate questions, fabricated citations and incomplete sets are rejected.
+- A student cannot submit with unanswered questions.
+- A known answer selection receives the exact deterministic score and complete feedback after submission.
+- Duplicate submission cannot double-count the attempt.
+- The weighted mastery formula produces the documented value across at least three attempts and changes the next difficulty mix at each boundary.
+- Cross-student read/write attempts fail; admin summary access succeeds only after server-side admin authorization.
+- Admin deletion removes the target email, summaries and mastery without affecting other students.
+- A human-reviewed quiz evaluation confirms each sampled question, correct answer, explanation and citation is supported by the cited PDF pages.
+- Existing Version 1 regression checks continue to pass.
+
+### 11.6 Release Limits
+
+- Mastery is a transparent heuristic, not a psychometric assessment or official grade.
+- Difficulty labels are generated targets and require pilot review; they are not formally calibrated.
+- Questions may be similar across separate attempts because full question history is intentionally not retained.
+- Results disappear if the active Streamlit session is lost after submission because full quiz content is not persisted.
+- The admin is responsible for deleting quiz profiles at course end.

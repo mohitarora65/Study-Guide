@@ -1,8 +1,8 @@
 # Technology Stack Decision — Grounded Mathematics Study Guide
 
-**Status:** APPROVED — user said “the rest is fine” and confirmed paid API access on 2026-10-09  
-**Date:** 2026-10-09  
-**Decision owner:** User  
+**Status:** APPROVED — user said “the rest is fine” and confirmed paid API access on 2026-10-09
+**Date:** 2026-10-09
+**Decision owner:** User
 
 **Approved clarification, 2026-10-09:** V1.2 retrieval uses Google `gemini-embedding-2` at 768 dimensions. User approved AI STAR generation at `https://ai.starimg.ru/v1` with model `deepseek-v4-flash`, and explicitly accepts sending questions/retrieved excerpts despite unknown data retention. User reports OpenAI-compatible chat completions/JSON output, a `×0.1` token-balance multiplier, and requests stopping at zero. Dollar pricing and the user's report that data is not used for training are not independently verified; storage duration remains unknown. Synthetic live model/API and grounded-answer tests passed. The configured local key was used for those calls and never printed; whether it is the same credential previously pasted into chat is unknown. Official DeepSeek direct-API aliases/rates are not treated as AI STAR routing/pricing evidence.
 
@@ -150,3 +150,92 @@ The user may instead choose Option B or C. Choosing B requires a separate explic
 - [OpenAI API pricing](https://developers.openai.com/api/docs/pricing)
 - [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data)
 - [OpenAI embeddings](https://developers.openai.com/api/docs/guides/embeddings)
+
+## 9. Version 2 Stack Decision — Adaptive Quiz
+
+**Status:** APPROVED — user selected Option C on 2026-10-10
+**Date:** 2026-10-10
+
+### 9.1 Unchanged Foundation
+
+Version 2 keeps Streamlit, Google Workspace OIDC, `pypdf`, Supabase/PostgreSQL/pgvector, `gemini-embedding-2`, AI STAR `deepseek-v4-flash`, pytest and Streamlit Community Cloud. Mastery and attempt summaries remain normal Supabase application data regardless of the orchestration option.
+
+### 9.2 Option A — Direct Bounded Workflow
+
+Add a focused quiz module that calls the existing embedding/retrieval functions, sends one JSON-schema prompt through the existing AI STAR client, validates the seven-question payload, grades locally and updates Supabase transactionally.
+
+| Criterion | Assessment |
+|---|---|
+| Existing-code fit | Highest; directly reuses retrieval, provider calls, JSON repair, citation mapping, rate limiting and safe errors. |
+| New dependencies | None. |
+| Reliability | Explicit application-controlled steps; no model-selected tools or agent loop. |
+| Persistence | Supabase is the only durable state; Streamlit session holds the active quiz/results. |
+| Provider compatibility | Already proven against the configured AI STAR endpoint. |
+| Maintenance | Smallest change and fewest upgrade surfaces. |
+| Learning value | Demonstrates RAG, structured generation, deterministic grading, adaptation and transactional state without an agent-framework label. |
+
+### 9.3 Option B — LangChain Structured Generation
+
+Keep the application workflow explicit but use LangChain model wrappers and structured output for quiz generation and retry behavior. Existing Supabase retrieval and mastery storage stay unchanged.
+
+| Criterion | Assessment |
+|---|---|
+| Existing-code fit | Moderate; replaces the working direct AI STAR client only for quiz generation or requires two provider paths. |
+| New dependencies | LangChain core plus a compatible chat-model integration package. |
+| Reliability | Schema support is useful, but project-specific citation, duplicate, option and exact-count checks are still required. |
+| Persistence | Unchanged Supabase tables; LangChain memory is unnecessary. |
+| Provider compatibility | Must verify the AI STAR OpenAI-compatible endpoint through the chosen LangChain adapter. |
+| Maintenance | More framework/version coupling for limited reduction in local validation code. |
+| Learning value | Adds recognizable LangChain experience without a state graph. |
+
+### 9.4 Option C — LangChain and LangGraph Workflow
+
+Model quiz creation as graph nodes such as load mastery, retrieve evidence, generate, validate/repair and return quiz. Submission and persistence remain deterministic application/database operations rather than model tools.
+
+| Criterion | Assessment |
+|---|---|
+| Existing-code fit | Lowest; the workflow is short and already maps cleanly to ordinary functions. |
+| New dependencies | LangChain, LangGraph, provider integration and their transitive packages. |
+| Reliability | Graph edges make transitions visible, but do not replace validation, authorization, transactions or idempotency. |
+| Persistence | A graph checkpointer would duplicate state already held by Streamlit/Supabase; it should be omitted for this scope. |
+| Provider compatibility | Requires the same AI STAR adapter verification as Option B. |
+| Maintenance | Largest API and dependency surface. |
+| Learning value | Strongest agent-framework portfolio signal and leaves a path to later tool-based tutoring workflows. |
+
+### 9.5 Comparison
+
+| Concern | A: Direct | B: LangChain | C: LangChain + LangGraph |
+|---|---:|---:|---:|
+| New production dependencies | None | Medium | Highest |
+| Reuse of proven AI STAR code | Full | Partial | Partial |
+| Project-specific validation still required | Yes | Yes | Yes |
+| Durable state duplicated | No | No | Potentially, unless checkpointer is omitted |
+| Agent/tool autonomy | None | Optional and unnecessary | Available but deliberately constrained |
+| Expected implementation effort | Lowest | Medium | Highest |
+| Best fit for current seven-question workflow | **Yes** | Acceptable | More machinery than required |
+
+### 9.6 Recommendation
+
+Select **Option A: Direct Bounded Workflow**. The approved feature has no open-ended planning or tool-selection problem: the server always loads mastery, retrieves evidence, generates one validated set and returns it. Supabase already provides long-term state. Adding LangChain or LangGraph would not remove the security-sensitive validation, authorization, idempotency or transaction code.
+
+The product may still call the feature “Adaptive Quiz.” Internally describing it as an autonomous agent would overstate its behavior. LangChain/LangGraph should be reconsidered only when a later approved feature needs dynamic tool choice, pausable multi-step execution or several specialist workflows.
+
+If the user's primary objective is specifically to demonstrate an agent framework in a portfolio, choose Option C with no checkpointer and no model authority over database writes. That choice knowingly prioritizes framework-learning value over the smallest production design.
+
+### 9.7 Sources
+
+- [LangChain: Agents](https://docs.langchain.com/oss/python/langchain/agents)
+- [LangChain: Structured output](https://docs.langchain.com/oss/python/langchain/structured-output)
+- [LangGraph: Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+
+### 9.8 Approved Selection
+
+The user selected **Option C — LangChain and LangGraph Workflow** by replying “c” on 2026-10-10.
+
+Implementation constraints carried into G4:
+
+- Use `langchain-openai` `ChatOpenAI` with the approved AI STAR custom base URL and model only after a bounded compatibility check.
+- Prefer JSON mode plus local schema/domain validation because AI STAR compatibility with provider-native JSON Schema is not established.
+- Use a deterministic LangGraph state graph; the model does not choose arbitrary tools or transitions.
+- Do not add a LangGraph checkpointer or store. Supabase remains the only durable source of truth.
+- Keep grading, authorization, idempotency and database writes outside model control.
