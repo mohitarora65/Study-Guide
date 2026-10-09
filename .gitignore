@@ -1,0 +1,10 @@
+.DS_Store
+.streamlit/secrets.toml
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+evaluation/results/
+pdfs/

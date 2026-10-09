@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+import hashlib
+import math
+import time
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import PurePosixPath
+from typing import Any, Callable
+from uuid import uuid4
+
+from google import genai
+from google.genai import types
+from pypdf import PdfReader
+
+from study_guide import database
+
+
+MAX_PDF_BYTES = 25 * 1024 * 1024
+LOW_TEXT_CHAR_LIMIT = 100
+CHUNK_CHARS = 1_800
+CHUNK_OVERLAP = 250
+EMBEDDING_MODEL = "gemini-embedding-2"
+EMBEDDING_DIMENSION = 768
+EMBEDDING_BATCH_SIZE = 32
+
+
+class IngestionError(RuntimeError):
+    """An operator-safe ingestion failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ExtractedPage:
+    page_number: int
+    text: str
+    character_count: int
+    low_text: bool
+
+
+@dataclass(frozen=True)
+class Chunk:
+    page_number: int
+    chunk_order: int
+    content: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class PreparedDocument:
+    display_name: str
+    content_hash: str
+    file_size_bytes: int
+    pages: tuple[ExtractedPage, ...]
+    chunks: tuple[Chunk, ...]
+
+    @property
+    def low_text_pages(self) -> tuple[int, ...]:
+        return tuple(page.page_number for page in self.pages if page.low_text)
+
+    @property
+    def extracted_character_count(self) -> int:
+        return sum(page.character_count for page in self.pages)
+
+
+@dataclass(frozen=True)
+class IngestionOutcome:
+    document_id: str
+    display_name: str
+    chunk_count: int
+    duplicate: bool = False
+
+
+def _safe_display_name(filename: str) -> str:
+    name = PurePosixPath(filename.replace("\\", "/")).name.strip()
+    if not name or not name.casefold().endswith(".pdf"):
+        raise IngestionError("INVALID_FILE", "Choose a file with a .pdf extension.")
+    return name
+
+
+def _chunks_for_page(page_number: int, text: str) -> list[Chunk]:
+    chunks: list[Chunk] = []
+    start = 0
+    while start < len(text):
+        content = text[start : start + CHUNK_CHARS].strip()
+        if content:
+            chunks.append(
+                Chunk(
+                    page_number=page_number,
+                    chunk_order=len(chunks),
+                    content=content,
+                    content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                )
+            )
+        if start + CHUNK_CHARS >= len(text):
+            break
+        start += CHUNK_CHARS - CHUNK_OVERLAP
+    return chunks
+
+
+def prepare_pdf(filename: str, mime_type: str | None, data: bytes) -> PreparedDocument:
+    display_name = _safe_display_name(filename)
+    if mime_type and mime_type.casefold() != "application/pdf":
+        raise IngestionError("INVALID_FILE", "The selected file is not a PDF.")
+    if not data:
+        raise IngestionError("EMPTY_FILE", "The selected PDF is empty.")
+    if len(data) > MAX_PDF_BYTES:
+        raise IngestionError("FILE_TOO_LARGE", "PDFs must be 25 MiB or smaller.")
+    if not data.startswith(b"%PDF-"):
+        raise IngestionError("INVALID_FILE", "The selected file is not a readable PDF.")
+
+    try:
+        reader = PdfReader(BytesIO(data), strict=False)
+        if reader.is_encrypted:
+            raise IngestionError("ENCRYPTED_PDF", "Encrypted PDFs are not supported.")
+        source_pages = list(reader.pages)
+    except IngestionError:
+        raise
+    except Exception as exc:
+        raise IngestionError("INVALID_PDF", "The selected PDF could not be read.") from exc
+
+    if not source_pages:
+        raise IngestionError("EMPTY_PDF", "The selected PDF has no pages.")
+
+    pages: list[ExtractedPage] = []
+    chunks: list[Chunk] = []
+    try:
+        for page_number, page in enumerate(source_pages, start=1):
+            text = (page.extract_text() or "").replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+            character_count = sum(not char.isspace() for char in text)
+            pages.append(
+                ExtractedPage(
+                    page_number=page_number,
+                    text=text,
+                    character_count=character_count,
+                    low_text=character_count < LOW_TEXT_CHAR_LIMIT,
+                )
+            )
+            chunks.extend(_chunks_for_page(page_number, text))
+    except Exception as exc:
+        raise IngestionError("EXTRACTION_FAILED", "Text could not be extracted from this PDF.") from exc
+
+    if not chunks:
+        raise IngestionError(
+            "NO_EXTRACTABLE_TEXT",
+            "No extractable text was found. Scanned PDFs need OCR, which is not supported yet.",
+        )
+
+    return PreparedDocument(
+        display_name=display_name,
+        content_hash=hashlib.sha256(data).hexdigest(),
+        file_size_bytes=len(data),
+        pages=tuple(pages),
+        chunks=tuple(chunks),
+    )
+
+
+def _is_transient(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        pass
+    return isinstance(exc, (TimeoutError, ConnectionError)) or status in {
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
+
+
+def embed_chunks(
+    chunks: tuple[Chunk, ...],
+    api_key: str,
+    *,
+    client: Any | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[list[float]]:
+    if not api_key:
+        raise IngestionError("GEMINI_NOT_CONFIGURED", "Gemini is not configured yet.")
+    client = client or genai.Client(api_key=api_key)
+    vectors: list[list[float]] = []
+
+    for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
+        batch = chunks[offset : offset + EMBEDDING_BATCH_SIZE]
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text="Represent this course passage for retrieval:\n" + chunk.content
+                    )
+                ],
+            )
+            for chunk in batch
+        ]
+        for attempt in range(2):
+            try:
+                response = client.models.embed_content(
+                    model=EMBEDDING_MODEL,
+                    contents=contents,
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=EMBEDDING_DIMENSION
+                    ),
+                )
+                embeddings = response.embeddings or []
+                if len(embeddings) != len(batch):
+                    raise IngestionError(
+                        "INVALID_EMBEDDING_RESPONSE",
+                        "The embedding provider returned an invalid response.",
+                    )
+                for embedding in embeddings:
+                    values = list(embedding.values or [])
+                    if len(values) != EMBEDDING_DIMENSION or not all(
+                        math.isfinite(value) for value in values
+                    ):
+                        raise IngestionError(
+                            "INVALID_EMBEDDING_RESPONSE",
+                            "The embedding provider returned an invalid response.",
+                        )
+                    vectors.append(values)
+                break
+            except IngestionError:
+                raise
+            except Exception as exc:
+                if attempt == 0 and _is_transient(exc):
+                    sleep(1)
+                    continue
+                raise IngestionError(
+                    "EMBEDDING_FAILED", "The document could not be embedded. Try again."
+                ) from exc
+
+    return vectors
+
+
+def _finish_ingestion(
+    client: Any,
+    prepared: PreparedDocument,
+    api_key: str,
+    document_id: str,
+    version_id: str,
+    run_id: str,
+    progress: Callable[[str], None],
+) -> IngestionOutcome:
+    try:
+        progress("Creating embeddings")
+        vectors = embed_chunks(prepared.chunks, api_key)
+        progress("Saving page-linked chunks")
+        database.insert_chunks(
+            client,
+            [
+                {
+                    "id": str(uuid4()),
+                    "version_id": version_id,
+                    "page_number": chunk.page_number,
+                    "chunk_order": chunk.chunk_order,
+                    "content": chunk.content,
+                    "content_hash": chunk.content_hash,
+                    "embedding": vector,
+                }
+                for chunk, vector in zip(prepared.chunks, vectors, strict=True)
+            ],
+        )
+        progress("Activating the completed version")
+        database.activate_version(
+            client,
+            {
+                "p_document_id": document_id,
+                "p_version_id": version_id,
+                "p_run_id": run_id,
+                "p_page_count": len(prepared.pages),
+                "p_low_text_pages": list(prepared.low_text_pages),
+                "p_extracted_character_count": prepared.extracted_character_count,
+                "p_processed_chunks": len(prepared.chunks),
+                "p_embedding_model": EMBEDDING_MODEL,
+                "p_embedding_dimension": EMBEDDING_DIMENSION,
+            },
+        )
+    except (IngestionError, database.DatabaseError) as exc:
+        safe_code = exc.code if isinstance(exc, IngestionError) else "INGESTION_FAILED"
+        database.mark_version_failed(
+            client, document_id, version_id, run_id, safe_code
+        )
+        if isinstance(exc, IngestionError):
+            raise
+        raise IngestionError(
+            "INGESTION_FAILED", "The document could not be indexed. Try again."
+        ) from exc
+
+    return IngestionOutcome(
+        document_id=document_id,
+        display_name=prepared.display_name,
+        chunk_count=len(prepared.chunks),
+    )
+
+
+def ingest_pdf(
+    client: Any,
+    api_key: str,
+    filename: str,
+    mime_type: str | None,
+    data: bytes,
+    *,
+    progress: Callable[[str], None] = lambda _message: None,
+) -> IngestionOutcome:
+    progress("Validating and extracting PDF text")
+    prepared = prepare_pdf(filename, mime_type, data)
+    existing = database.find_document_by_hash(client, prepared.content_hash)
+    if existing:
+        return IngestionOutcome(
+            document_id=existing["id"],
+            display_name=existing["display_name"],
+            chunk_count=0,
+            duplicate=True,
+        )
+
+    document_id = str(uuid4())
+    version_id = str(uuid4())
+    run_id = str(uuid4())
+    object_path = f"documents/{document_id}/{prepared.content_hash}.pdf"
+
+    progress("Uploading the private source PDF")
+    database.upload_pdf(client, object_path, data)
+    try:
+        database.create_document_records(
+            client,
+            document={
+                "id": document_id,
+                "display_name": prepared.display_name,
+                "object_path": object_path,
+                "content_hash": prepared.content_hash,
+                "file_size_bytes": prepared.file_size_bytes,
+                "status": "processing",
+            },
+            version={
+                "id": version_id,
+                "document_id": document_id,
+                "version_number": 1,
+                "status": "processing",
+                "embedding_model": EMBEDDING_MODEL,
+                "embedding_dimension": EMBEDDING_DIMENSION,
+            },
+            run={
+                "id": run_id,
+                "document_id": document_id,
+                "version_id": version_id,
+                "retry_key": str(uuid4()),
+                "status": "processing",
+            },
+        )
+    except database.DatabaseError:
+        database.remove_pdf(client, object_path)
+        raise
+
+    return _finish_ingestion(
+        client, prepared, api_key, document_id, version_id, run_id, progress
+    )
+
+
+def retry_failed_document(
+    client: Any,
+    api_key: str,
+    document_id: str,
+    *,
+    progress: Callable[[str], None] = lambda _message: None,
+) -> IngestionOutcome:
+    document = database.get_document(client, document_id)
+    progress("Loading the private source PDF")
+    data = database.download_pdf(client, document["object_path"])
+    prepared = prepare_pdf(document["display_name"], "application/pdf", data)
+    if prepared.content_hash != document["content_hash"]:
+        raise IngestionError("SOURCE_CHANGED", "The stored source PDF failed validation.")
+    version_id, run_id = database.get_failed_attempt(client, document_id)
+    return _finish_ingestion(
+        client, prepared, api_key, document_id, version_id, run_id, progress
+    )
+
+
+def reindex_document(
+    client: Any,
+    api_key: str,
+    document_id: str,
+    *,
+    progress: Callable[[str], None] = lambda _message: None,
+) -> IngestionOutcome:
+    document = database.get_document(client, document_id)
+    progress("Loading and validating the private source PDF")
+    data = database.download_pdf(client, document["object_path"])
+    prepared = prepare_pdf(document["display_name"], "application/pdf", data)
+    if prepared.content_hash != document["content_hash"]:
+        raise IngestionError("SOURCE_CHANGED", "The stored source PDF failed validation.")
+
+    version_id = str(uuid4())
+    run_id = str(uuid4())
+    database.create_version_records(
+        client,
+        version={
+            "id": version_id,
+            "document_id": document_id,
+            "version_number": database.next_version_number(client, document_id),
+            "status": "processing",
+            "embedding_model": EMBEDDING_MODEL,
+            "embedding_dimension": EMBEDDING_DIMENSION,
+        },
+        run={
+            "id": run_id,
+            "document_id": document_id,
+            "version_id": version_id,
+            "retry_key": str(uuid4()),
+            "status": "processing",
+        },
+    )
+    return _finish_ingestion(
+        client, prepared, api_key, document_id, version_id, run_id, progress
+    )
+
+
+def delete_document(client: Any, document_id: str) -> None:
+    object_path = database.begin_document_delete(client, document_id)
+    database.remove_pdf(client, object_path)
+    database.delete_document_record(client, document_id)

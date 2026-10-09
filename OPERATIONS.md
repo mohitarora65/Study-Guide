@@ -1,0 +1,140 @@
+# Operations — Grounded Mathematics Study Guide
+
+**Status:** V1.5 deployment-readiness document. No public deployment has been performed or authorized.  
+**Last updated:** 2026-10-09
+
+## Deployment target
+
+- Host: Streamlit Community Cloud.
+- Source: a dedicated GitHub repository, branch selected by the user, entrypoint `app.py`.
+- Python: select 3.12 in Streamlit advanced settings.
+- Data: the existing Supabase project, using server-held service credentials.
+- Identity: the existing Google OAuth client with an exact deployed callback.
+- Retrieval: Google `gemini-embedding-2`, 768 dimensions.
+- Generation: AI STAR `deepseek-v4-flash` at `https://ai.starimg.ru/v1`.
+
+The current project directory is untracked inside the broader `/Users/mohitarora` Git root. Do not deploy from or broadly stage that home-directory repository. Create or select a dedicated repository first; the user performs all Git operations.
+
+## Repository boundary
+
+Include the application, tests, migrations and planning/operating documentation. Do not include:
+
+- `.streamlit/secrets.toml`;
+- `.venv/`, caches, bytecode or evaluation result files;
+- `pdfs/` or any local course PDF—the approved corpus is already stored in private Supabase Storage;
+- API keys, OAuth credentials, service-role keys, cookies, tokens or copied logs.
+
+Before each push, inspect the exact project-scoped file list and staged diff. Never use an unscoped `git add -A` from `/Users/mohitarora`.
+
+## Required Streamlit secrets
+
+Enter these values directly in Streamlit Community Cloud app settings. Never commit or paste their real values into documentation or chat.
+
+```toml
+[auth]
+redirect_uri = "https://<final-app-host>/oauth2callback"
+cookie_secret = "<new-or-approved-strong-secret-at-least-32-characters>"
+client_id = "<google-oauth-client-id>"
+client_secret = "<google-oauth-client-secret>"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+
+[app]
+allowed_domain = "iiti.ac.in"
+admin_emails = ["<allowlisted-iiti-admin-address>"]
+user_key_secret = "<approved-strong-secret-at-least-32-characters>"
+
+[supabase]
+url = "https://<project-ref>.supabase.co"
+service_role_key = "<server-only-service-role-key>"
+
+[gemini]
+api_key = "<gemini-api-key>"
+
+[ai_star]
+api_key = "<ai-star-api-key>"
+```
+
+`user_key_secret` must remain stable after real chats begin. Changing it changes derived user identifiers and makes existing chat ownership records unreachable through the app. Rotating it therefore needs a separately approved migration/retention decision. The OAuth `cookie_secret` may invalidate sessions when rotated, which is acceptable during a planned maintenance window.
+
+## Pre-deployment checklist
+
+1. User selects or creates a dedicated GitHub repository and branch.
+2. Confirm the proposed repository contains no secrets or local PDFs.
+3. Run the full tests, compilation, `pip check`, OSV inventory scan and source secret scan.
+4. Confirm `app.py` is the Streamlit entrypoint and choose Python 3.12.
+5. Deploy once to obtain the final HTTPS app URL.
+6. Set the Community Cloud secrets with the final URL plus `/oauth2callback`.
+7. Add that exact URI to the existing Google OAuth client's Authorized redirect URIs.
+8. Keep the Google consent application's existing audience/status unless a separate publication decision is required and approved.
+9. Restart the app and perform the bounded smoke checks below.
+
+Steps 5–8 change external state and require the mandatory pre-deployment approval recorded in `PHASE_PLAN_V1.5.md`.
+
+## Deployed smoke checks
+
+Record date, tester role, result and evidence without recording secrets, identity tokens, full student identities, full question text or course excerpts.
+
+1. Public URL returns the signed-out page over HTTPS.
+2. An authorized `iiti.ac.in` account signs in and out.
+3. Exact-domain rejection remains covered by automated tests; use a real wrong-domain account only if the user authorizes that account for testing.
+4. Admin sees Documents and the ready PDF metadata; no upload, re-index or delete is needed for release smoke testing.
+5. Student Study page renders and an approved synthetic supported question returns a validated page citation.
+6. An approved synthetic unsupported question returns the standard insufficient-material response.
+7. Synthetic chat history can be revisited. Deletion is tested only with an explicitly disposable synthetic thread and action-time confirmation when performed through a browser.
+8. A second authorized account verifies cross-user isolation if available; otherwise record browser-level cross-account testing as `NOT TESTED` and cite the existing automated ownership tests.
+9. Record response latency and any provider/quota errors. Do not extrapolate the three-request development burst into class-capacity claims.
+
+## Routine operation
+
+- Check Streamlit logs for safe error categories only; do not add full questions, answers, emails, tokens or course excerpts to logs.
+- Check Supabase project availability/storage and provider dashboards when failures occur.
+- AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
+- Gemini embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
+- Do not re-index or delete the ready course document as a health check.
+- Apply migrations only in filename order and only after separately confirming the target project and reviewing the SQL. No migration is planned for V1.5.
+
+## Incident triage
+
+| Symptom | First checks | Safe response |
+|---|---|---|
+| App unavailable | Streamlit app status/logs and recent deployment | Reboot the app; if a release caused it, roll back to the last known-good commit/deployment. |
+| Login loop/failure | Final app URL, Streamlit `auth.redirect_uri`, Google authorized redirect URI | Make the URIs identical, including HTTPS and `/oauth2callback`; do not weaken domain checks. |
+| All questions fail before generation | Gemini quota/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
+| Generation fails | AI STAR balance/status/key | Keep safe error output; do not switch models/providers without a new approval. |
+| Incorrect or missing citations | Retrieval/evaluation evidence and active document version | Pause pilot use if systemic; do not lower citation validation. |
+| Suspected secret exposure | Affected service and repository/log surface | Disable the app if needed, rotate the specific credential, inspect exposure scope and record the incident. Never paste the credential into chat. |
+| Suspected cross-user access | Owner filters, logs without content, automated isolation tests | Disable the app immediately and investigate before restoring access. |
+
+## Rollback
+
+1. Stop or disable the Streamlit app to end public access.
+2. Redeploy the last known-good user-selected commit if the issue is code-only.
+3. Remove the deployed Google OAuth redirect URI if the deployment is abandoned; preserve the local callback if local development continues.
+4. Rotate only credentials that may have been exposed. Keep `user_key_secret` stable unless a migration/data-access consequence is explicitly approved.
+5. Leave Supabase documents and chat data intact by default. Data deletion is separate, destructive work requiring exact targets and approval.
+6. Verify the disabled/rolled-back URL and record the result in `PROGRESS.md`.
+
+## Cost, privacy and capacity limits
+
+- Gemini embeddings are paid and metered; exact deployed cost is not available from the app.
+- AI STAR consumes the purchased balance with a user-reported ×0.1 multiplier and stop-at-zero behavior. Dollar pricing, expiry and storage/retention remain unverified.
+- Questions go to Gemini for embedding. Questions, bounded recent conversation and retrieved excerpts go to AI STAR for generation. Names, email addresses and identity tokens are not intentionally sent.
+- Streamlit Community Cloud and Supabase free services have no class-wide uptime or concurrency guarantee.
+- The measured three-concurrent-request burst completed successfully, but it is not evidence for 120 simultaneous generations.
+
+## Final audit status before deployment
+
+| Category | Status | Evidence / remaining deployment check |
+|---|---|---|
+| Approved scope and planning | PASS | G0–G5 and V1.1–V1.5 phase files exist; V1.1–V1.4 are signed off and V1.5 is approved. |
+| Core local functionality | PASS | V1.4 evaluation thresholds passed; current full regression must pass again before deployment. |
+| Authentication/authorization | PASS locally | Google Admin login and automated domain/ownership tests passed; deployed callback and optional real wrong-domain flow remain. |
+| Grounding/citations/refusal | PASS locally | TA-reviewed 40-question result passed all five PRD thresholds; A09 false refusal is accepted. |
+| Security/privacy | PASS with known provider risk | Server-held secrets, private Storage, exact-domain/admin checks and prompt/citation validation exist. AI STAR retention remains unknown and accepted. |
+| Dependencies | PASS locally | Latest V1.4 OSV scan covered 74 installed distributions with zero advisories after pip remediation; rerun before deployment. |
+| Accessibility | PASS with limits | Light-theme contrast, keyboard focus and 390-pixel width passed. Dark theme and a separate student-account browser session were not tested. |
+| Performance/capacity | PARTIAL | Health/latency/memory and a three-request answer burst were measured. Class-wide capacity is not established. |
+| Deployment | NOT TESTED | No GitHub target, Streamlit app URL or deployed smoke-test evidence yet. |
+| Rollback/operations | PASS as procedure | This document defines response and rollback; real execution remains untested until deployment. |
+
+Final release status cannot exceed **controlled pilot candidate** until the real URL and deployed critical paths pass and the user explicitly approves release.
