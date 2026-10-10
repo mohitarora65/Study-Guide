@@ -134,7 +134,7 @@ Post-completion interview artifacts
 
 - verify and pin compatible `langchain`, `langchain-openai` and `langgraph` packages;
 - run a bounded synthetic AI STAR compatibility probe through LangChain custom-base-URL JSON mode before committing to the adapter;
-- add the deterministic LangGraph generation/validation/repair workflow without a checkpointer or model-controlled database tools;
+- add the deterministic LangGraph batch-generation/validation workflow without a checkpointer or model-controlled database tools; approved batch strategy stops on failure within three requests, without repair;
 - add the quiz topic, profile, attempt-summary and mastery migration with denied browser access and transactional/idempotent completion/deletion functions;
 - extend verified identity with normalized institutional email while excluding it from provider payloads and logs;
 - add quiz retrieval, exact seven-MCQ validation, deterministic grading and rolling-mastery logic;
@@ -150,6 +150,8 @@ Post-completion interview artifacts
 ### Phase V2.2 — Quiz Evaluation, Production Rollout and Final Audit
 
 **User-visible outcome:** The live Streamlit application exposes the approved quiz workflow with reviewed question quality, documented operational limits and a rollback path.
+
+**2026-10-10 redesign:** live quiz generation was replaced locally by a bundled, source-checked bank after bounded provider/model strategies remained unreliable. The student flow now makes zero generation/embedding calls; provider-generation code is retained only for offline evaluation. See `PHASE_PLAN_QUESTION_BANK.md`.
 
 **Deliverables:**
 

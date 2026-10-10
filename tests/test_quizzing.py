@@ -75,22 +75,59 @@ def test_quiz_validation_bounds_output_for_provider_token_cap() -> None:
         validate_quiz_response(json.dumps(payload), EVIDENCE, mix)
 
 
-def test_quiz_graph_repairs_invalid_provider_json_once() -> None:
+def test_quiz_graph_stops_on_invalid_batch_without_repair() -> None:
     mix = difficulty_mix(60)
-    outputs = iter(["not json", quiz_json(mix)])
     calls: list[list[dict[str, str]]] = []
 
     def generate(messages: list[dict[str, str]]) -> str:
         calls.append(messages)
-        return next(outputs)
+        return "not json"
 
     result = build_quiz_graph(retrieve=lambda _topic: EVIDENCE, generate=generate).invoke(
         {"topic": "Vector spaces", "difficulty_mix": mix, "repair_count": 0}
     )
 
+    assert "not valid JSON" in result["safe_error"]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mastery", [None, 60, 85])
+def test_batches_preserve_mix_and_bound_calls(mastery: int | None) -> None:
+    mix = difficulty_mix(mastery)
+    calls = []
+
+    def generate(messages):
+        batch_mix = json.loads(messages[1]["content"])["required_difficulty_mix"]
+        payload = json.loads(quiz_json(batch_mix))
+        for row in payload["questions"]:
+            row["question"] = f"Batch {len(calls)}: {row['question']}"
+        calls.append(batch_mix)
+        return json.dumps(payload)
+
+    result = build_quiz_graph(retrieve=lambda _: EVIDENCE, generate=generate).invoke(
+        {"topic": "Vector spaces", "difficulty_mix": mix}
+    )
     assert len(result["questions"]) == 7
+    assert len(calls) <= 3
+    assert all(sum(batch.values()) <= 3 for batch in calls)
+    assert {level: sum(batch[level] for batch in calls) for level in mix} == mix
+    if mastery == 85:
+        assert [sum(batch.values()) for batch in calls] == [1, 3, 3]
+
+
+def test_duplicate_across_batches_stops_before_next_call() -> None:
+    calls = []
+
+    def generate(messages):
+        batch_mix = json.loads(messages[1]["content"])["required_difficulty_mix"]
+        calls.append(batch_mix)
+        return quiz_json(batch_mix)
+
+    result = build_quiz_graph(retrieve=lambda _: EVIDENCE, generate=generate).invoke(
+        {"topic": "Vector spaces", "difficulty_mix": difficulty_mix(85)}
+    )
+    assert "duplicate questions" in result["safe_error"]
     assert len(calls) == 2
-    assert "failed validation" in calls[1][-1]["content"]
 
 
 def test_quiz_graph_stops_before_generation_without_evidence() -> None:
@@ -114,8 +151,12 @@ def test_quiz_provider_payload_excludes_student_identity() -> None:
     mix = difficulty_mix(None)
 
     def generate(messages: list[dict[str, str]]) -> str:
+        batch_mix = json.loads(messages[1]["content"])["required_difficulty_mix"]
+        payload = json.loads(quiz_json(batch_mix))
+        for row in payload["questions"]:
+            row["question"] = f"Batch {len(captured)}: {row['question']}"
         captured.extend(messages)
-        return quiz_json(mix)
+        return json.dumps(payload)
 
     quiz = generate_quiz(
         "Vector spaces",
@@ -132,6 +173,8 @@ def test_quiz_provider_payload_excludes_student_identity() -> None:
     assert len(quiz.questions) == 7
     assert "opaque-private-owner-key" not in payload
     assert "@iiti.ac.in" not in payload
+    assert "limit each explanation to eight words" in captured[0]["content"]
+    assert "never write that product as Ay" in captured[0]["content"]
 
 
 def test_ai_star_adapter_disables_hidden_transport_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,4 +197,35 @@ def test_ai_star_adapter_disables_hidden_transport_retries(monkeypatch: pytest.M
 
     assert quizzing._call_ai_star_langchain("a" * 32, []) == "{}"
     assert captured["max_retries"] == 0
-    assert captured["max_tokens"] == quizzing.MAX_QUIZ_OUTPUT_TOKENS
+    assert captured["model"] == quizzing.AI_STAR_MODEL
+    assert captured["extra_body"] == {"max_tokens": quizzing.MAX_QUIZ_OUTPUT_TOKENS}
+    assert captured["timeout"] == 30
+
+
+def test_adapter_sends_provider_token_cap_on_wire(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+    from langchain_openai import ChatOpenAI
+    import study_guide.quizzing as quizzing
+
+    captured = {}
+
+    def respond(request):
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={
+            "id": "synthetic-response", "object": "chat.completion", "created": 0,
+            "model": "synthetic-model", "choices": [{"index": 0,
+            "message": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}],
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+        monkeypatch.setattr(quizzing, "ChatOpenAI", lambda **kwargs: ChatOpenAI(
+            **kwargs, http_client=client
+        ))
+        assert quizzing._call_ai_star_langchain("synthetic-key", [
+            {"role": "user", "content": "Return JSON."}
+        ]) == "{}"
+
+    assert captured["max_tokens"] == 2000
+    assert captured["model"] == quizzing.AI_STAR_MODEL
+    assert "max_completion_tokens" not in captured
+    assert captured["response_format"] == {"type": "json_object"}

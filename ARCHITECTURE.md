@@ -158,11 +158,11 @@ The reported 10-million-token allowance belongs to the separate third-party gene
 Version 2 adds four focused pieces while preserving the Version 1 application:
 
 - **Quiz view:** topic selection, active attempt, delayed feedback, results and summary history.
-- **Quiz workflow:** a deterministic LangGraph graph for retrieval, generation, validation and one bounded repair path.
+- **Quiz workflow:** local mastery-based sampling from a bundled, source-checked question bank.
 - **Quiz persistence:** narrow Supabase functions for topics, profiles, mastery, attempt completion, analytics and deletion.
 - **Admin views:** topic management and student-progress summaries.
 
-The existing direct answer flow remains unchanged. Quiz generation uses LangChain's `ChatOpenAI` against the approved AI STAR OpenAI-compatible base URL. A compatibility check must confirm ordinary invocation and JSON mode before implementation proceeds past the adapter boundary; provider-native JSON Schema is not assumed.
+The existing direct answer flow remains unchanged and still uses the approved providers. Starting a quiz does not call Gemini or AI STAR. Provider-generation code remains only for offline evaluation and is outside the student request path.
 
 ### 13.2 Identity and Privacy Boundary
 
@@ -181,49 +181,30 @@ The browser still has no Supabase credential. The Streamlit server uses its secr
 
 Foreign keys cascade profile deletion through mastery and attempts. Topic deletion is not exposed; topics are deactivated so historical summaries keep a stable label.
 
-### 13.4 LangGraph State and Flow
-
-Graph state contains only quiz-generation data:
+### 13.4 Reviewed Question Bank Flow
 
 ```text
-topic_name
-mastery_score
-difficulty_mix
-retrieved_evidence
-candidate_questions
-repair_count
-safe_error
+active topic + mastery
+  ↓
+select required easy/medium/hard counts
+  ↓
+shuffle questions and answer options
+  ↓
+seven-question in-session quiz
 ```
 
-It explicitly excludes email, user key, access tokens, provider keys and database-write authority.
+- `question_bank.py` holds 11 source-checked questions per approved topic: four easy, four medium and three hard.
+- The selector uses the existing mastery mix, samples without replacement and shuffles option order while preserving the correct index.
+- Every question carries a fixed approved document name and PDF page citation. Unsupported topics or incomplete difficulty pools fail safely and create no attempt.
+- Identity, email, student keys, provider keys and database-write authority never enter the selector.
 
-```text
-START
-  ↓
-retrieve_evidence ──insufficient──→ safe_failure
-  ↓
-generate_questions
-  ↓
-validate_questions ──valid──→ END
-  │
-  └──invalid and repair_count=0──→ repair_questions ─→ validate_questions
-                                      │
-                                      └──still invalid──→ safe_failure
-```
-
-- `retrieve_evidence` calls the existing Gemini query embedding and active-chunk search using the selected topic name.
-- `generate_questions` calls AI STAR once through LangChain JSON mode with the required difficulty mix and bounded retrieved excerpts.
-- `validate_questions` is deterministic application code enforcing the PRD's exact count, fields, lengths, unique options/questions, answer indexes, difficulty mix and retrieved citation IDs.
-- `repair_questions` makes at most one provider call using the original evidence and validation errors.
-- `safe_failure` returns a student-safe retry or insufficient-evidence result and performs no persistence.
-
-The graph is compiled without a checkpointer or LangGraph store. Active questions remain in Streamlit session state; durable summaries/mastery remain in Supabase.
+The selector has no graph, checkpointer or provider state. Active questions remain in Streamlit session state; durable summaries/mastery remain in Supabase.
 
 ### 13.5 Quiz Creation and Submission
 
 1. Re-check the authenticated identity and selected active topic.
 2. Load mastery by `user_key`; a missing row means the Foundation difficulty mix.
-3. Generate a random attempt UUID and invoke the graph with topic, mastery and mix only.
+3. Sample the required mix from the exact topic's bundled bank.
 4. Store the validated quiz and attempt UUID in Streamlit session state. No database row exists yet.
 5. Require one selected option for every question before enabling submission.
 6. Grade locally against the validated in-session answer key.
@@ -249,9 +230,9 @@ The database returns the committed mastery; the UI never treats a client/session
 
 | Failure | Required behavior |
 |---|---|
-| LangChain adapter incompatibility | Stop the phase at the compatibility check; do not add a second hidden provider path. |
-| Weak topic retrieval | Explain that the uploaded material does not sufficiently cover the topic; create no attempt. |
-| Invalid generation after repair | Show a safe retry message; create no attempt or mastery change. |
+| Unsupported active topic | Hide it from the student selector until source-checked bank content exists. |
+| Incomplete difficulty pool | Return a safe unavailable message; create no attempt or mastery change. |
+| Invalid bundled content | Fail the bank contract tests and do not release the change. |
 | Session loss before submission | Quiz is lost; summary/mastery stay unchanged. |
 | Database failure on submission | Preserve the active session quiz and UUID; allow idempotent retry. |
 | Duplicate submit/rerun | Return the existing committed summary; do not update mastery twice. |
@@ -266,9 +247,9 @@ Admin deletion names the student's email, requires confirmation and invokes one 
 
 ### 13.9 Required Verification
 
-- LangChain custom-base-URL and JSON-mode compatibility against AI STAR using synthetic content.
-- Graph branch tests for success, insufficient evidence, one repair and terminal failure.
-- Schema/domain tests for malformed questions, duplicate options/questions, wrong difficulty mix and fabricated citations.
+- Bank tests for all mastery mixes, capacity, field bounds, duplicate questions/options and answer-index preservation after shuffling.
+- App tests proving quiz creation works without provider keys and unsupported topics are hidden.
+- Source review of every answer, distractor, difficulty and document/page citation.
 - Transaction/idempotency tests across first, repeated and later attempts.
 - Cross-student isolation and admin-only email analytics/deletion tests.
 - No-email-in-provider-payload/log assertions.

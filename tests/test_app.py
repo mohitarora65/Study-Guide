@@ -164,7 +164,7 @@ from unittest.mock import patch
 import app
 from study_guide.quizzing import GeneratedQuiz, QuizQuestion
 
-settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+settings = SimpleNamespace(gemini_api_key=None, ai_star_api_key=None)
 identity = SimpleNamespace(
     user_key="synthetic-owner", email="student@iiti.ac.in", is_admin=False
 )
@@ -177,7 +177,7 @@ question = QuizQuestion(
     citations=({"display_name": "notes.pdf", "page_number": 12},),
 )
 quiz = GeneratedQuiz(
-    topic="Vector spaces",
+    topic="Rank and fundamental subspaces",
     mastery_before=None,
     difficulty_mix={"easy": 4, "medium": 3, "hard": 0},
     questions=(question,) * 7,
@@ -188,17 +188,17 @@ def save_summary(_client, **values):
             "attempt_count": 1, "duplicate": False}
 with patch.object(app, "build_client", return_value=object()), \\
      patch.object(app, "list_quiz_topics", return_value=[
-         {"id": "topic-1", "name": "Vector spaces", "active": True}
+         {"id": "topic-1", "name": "Rank and fundamental subspaces", "active": True}
      ]), \\
      patch.object(app, "get_topic_mastery", return_value=None), \\
-     patch.object(app, "generate_quiz", return_value=quiz), \\
+     patch.object(app, "generate_bank_quiz", return_value=quiz), \\
      patch.object(app, "complete_quiz_attempt", side_effect=save_summary):
     app.render_quiz_page(settings, identity)
 '''
     app = AppTest.from_string(script).run()
     assert not app.exception
 
-    next(button for button in app.button if button.label == "Generate 7-question quiz").click().run()
+    next(button for button in app.button if button.label == "Start 7-question quiz").click().run()
     assert not app.exception
     assert len(app.radio) == 7
     for radio in app.radio:
@@ -212,6 +212,53 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert saved["correct_count"] == 7
     assert "questions" not in saved
     assert any("Score: 7/7" in success.value for success in app.success)
+
+
+def test_failed_quiz_generation_shows_safe_error_without_saving_attempt() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+from study_guide.quizzing import QuizError
+
+settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+identity = SimpleNamespace(user_key="synthetic-owner", email="student@iiti.ac.in", is_admin=False)
+message = "The quiz could not be prepared. Please try again."
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "topic-1", "name": "Rank and fundamental subspaces", "active": True}
+     ]), \\
+     patch.object(app, "get_topic_mastery", return_value=None), \\
+     patch.object(app, "generate_bank_quiz", side_effect=QuizError(message)), \\
+     patch.object(app, "complete_quiz_attempt", side_effect=AssertionError("failed quiz must not be saved")):
+    app.render_quiz_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run()
+    next(button for button in app.button if button.label == "Start 7-question quiz").click().run()
+
+    assert not app.exception
+    assert any(error.value == "The quiz could not be prepared. Please try again." for error in app.error)
+    assert "active_quiz" not in app.session_state
+    assert "saved_quiz_summary" not in app.session_state
+
+
+def test_quiz_page_hides_topics_without_reviewed_bank_content() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "topic-1", "name": "Unreviewed topic", "active": True}
+     ]):
+    app.render_quiz_page(SimpleNamespace(), SimpleNamespace(user_key="owner"))
+'''
+    app = AppTest.from_string(script).run()
+
+    assert not app.exception
+    assert app.info[0].value == "No reviewed quiz topics are available yet."
+    assert not any(button.label == "Start 7-question quiz" for button in app.button)
 
 
 def test_student_progress_shows_mastery_and_attempt_summaries() -> None:

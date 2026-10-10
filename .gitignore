@@ -9,3 +9,5 @@ htmlcov/
 evaluation/results/
 evaluation/quiz_results/
 pdfs/
+graphify-out/
+.serena/

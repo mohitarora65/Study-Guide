@@ -4,7 +4,9 @@ A Streamlit study assistant for IIT Indore's Mathematics for AI/ML course. It an
 
 ## Current State
 
-V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2.1 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. V2.1 is implemented locally; V2.2 evaluation is partial, and the V2 deployment plan is proposed but not yet approved for execution.
+V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. Quiz creation now samples a bundled, source-checked bank instead of waiting for live model generation. The deployment plan is approved, but no change to production `main` or the deployed app has occurred.
+
+The bundled bank contains 11 questions for each approved topic—four easy, four medium and three hard—so every mastery mix can be assembled locally. Question and option order are randomized. Unsupported topics fail safely until source-checked questions are added. See `PHASE_PLAN_QUESTION_BANK.md`.
 
 ## Requirements
 
@@ -60,12 +62,12 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 ## Adaptive Quiz
 
 - Admins create, rename and activate topic names.
-- A student selects a topic; semantic retrieval uses only active course chunks.
-- LangChain calls the approved OpenAI-compatible AI STAR endpoint, while a deterministic LangGraph workflow retrieves, generates, validates and allows one repair.
-- Every quiz must contain exactly seven unique MCQs with four distinct options, the mastery-selected difficulty mix and citations to retrieved chunks.
+- A student selects a topic; the server samples source-checked questions for that exact topic without a live provider call.
+- Every quiz contains exactly seven unique MCQs with four distinct options, the mastery-selected difficulty mix and citations to the approved PDF pages.
+- The bundled bank currently covers Rank and fundamental subspaces, Eigenvalues and eigenvectors, and Singular value decomposition. Other topic names fail safely until reviewed content is added.
 - Answers are graded locally. Supabase stores only attempt summaries and rolling mastery: `60%` latest score plus `40%` previous mastery after the first attempt.
 - Students see only their own progress. Admins can filter progress by institutional email and delete that quiz profile and its summary history.
-- Full questions remain transient in Streamlit session state and are not stored in Supabase.
+- Full questions are bundled with the application and remain transient per attempt; Supabase stores no questions or answers.
 
 ## PDF Ingestion
 
@@ -127,5 +129,5 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 - V1.4 live evaluation and TA scoring are complete. A09 is a user-accepted known false refusal. Brave checks confirmed the sign-in flow and authenticated Admin/Study navigation; duplicate Streamlit page paths found during testing were fixed. In light theme, application body text and the sign-in button meet WCAG AA contrast; keyboard focus and 390-pixel width were checked on the signed-out page. Dark theme and a separate student-account browser session remain untested. A three-request synthetic concurrent burst completed with 6.28–7.10 second per-request latency and citations; it is not a capacity guarantee. An OSV scan covered 74 installed Python distributions, found local pip 26.1.2 affected by [GHSA-qwm4-qh6w-59xr](https://github.com/advisories/GHSA-qwm4-qh6w-59xr), and the local installer was updated to fixed version 26.2.0. The repeat scan found no advisories. No scanner package was installed.
 - V2.1 has not been deployed; the existing V1 deployment was not changed in this phase.
 - Streamlit Community Cloud and Supabase free hosting do not guarantee capacity or uptime for simultaneous class-wide use.
-- V2.2 attempted one seven-question generation for each of three approved topics. All three provider responses ended with `LengthFinishReasonError` (HTTP 200) at the configured output limit; the call cap is exhausted, so no complete quiz could be manually reviewed. The local output-token limit was raised from 1,800 to 3,500 with regression coverage, but this adjustment could not be live-verified within the cap. Authenticated student/admin browser flows, question quality and full-quiz latency remain unverified. See `PHASE_PLAN_V2.2.md` and `OPERATIONS.md`.
+- Historical live-generation trials were unreliable, so the student path now uses the bundled bank. Automated checks and local source checking cover all 33 questions; teaching-assistant content sign-off, authenticated browser flow and quiz keyboard/focus behavior remain pending. V2 is not release-ready. See `PHASE_PLAN_QUESTION_BANK.md` and `OPERATIONS.md`.
 # Study-Guide

@@ -1,6 +1,6 @@
 # Operations — Grounded Mathematics Study Guide
 
-**Status:** V1.5 deployment readiness plus V2.2 partial local adaptive-quiz evaluation. A V2 deployment is proposed in `DEPLOYMENT_PLAN_V2.md` and awaits its remaining approvals and prerequisites.
+**Status:** V1.5 deployment readiness plus a locally complete V2 question-bank redesign. V2 deployment remains blocked on teaching-assistant review of the full bank, authenticated quiz/browser evidence and the user-controlled release checkpoint. See `DEPLOYMENT_PLAN_V2.md`.
 **Last updated:** 2026-10-10
 
 ## Deployment target
@@ -90,12 +90,13 @@ Record date, tester role, result and evidence without recording secrets, identit
 ## Routine operation
 
 - Check Streamlit logs for safe error categories only; do not add full questions, answers, emails, tokens or course excerpts to logs.
-- Check Supabase project availability/storage and provider dashboards when failures occur.
+- Check Supabase project availability/storage and provider dashboards when answer or ingestion flows fail.
 - AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
 - Gemini embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
 - Do not re-index or delete the ready course document as a health check.
-- Quiz generation is limited to six requests per user per app process per hour. A failed generation also consumes one slot.
-- V2.2's three approved synthetic generations all reached the provider's output-length finish condition (HTTP 200) and returned the safe failure. The total call cap is exhausted. Do not retry, switch providers, or relax validation under this phase; the 3,500-token output limit has not yet been live-verified.
+- Student quiz creation is local and does not consume provider balance.
+- V2.2's three approved synthetic generations reached the provider's output-length limit. V2.3's Rank set and V2.5's Eigenvalues set passed manual source review. V2.8's raw SVD diagnostic stopped normally at 4,761/5,000 completion tokens and passed structural validation, but V2.9's normal application path still truncated at 6,000. The runtime cap was restored to 5,000. This variability makes further cap increases a poor reliability strategy. Do not make another call, change reasoning behavior, switch providers/models or redesign the workflow without approval; authenticated quiz browser/accessibility checks remain not tested.
+- The approved redesign samples from the bundled bank. Add or change questions only after checking the answer, distractors, difficulty and cited PDF page. Unsupported topic names intentionally fail safely.
 - Quiz questions are transient. Only score, mastery, difficulty mix, topic, email-linked profile and timestamps are stored.
 - Apply migrations only in filename order and only after separately confirming the target project and reviewing the SQL. Future migrations require a separately approved phase.
 
@@ -107,7 +108,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 | Login loop/failure | Final app URL, Streamlit `auth.redirect_uri`, Google authorized redirect URI | Make the URIs identical, including HTTPS and `/oauth2callback`; do not weaken domain checks. |
 | All questions fail before generation | Gemini quota/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
 | Generation fails | AI STAR balance/status/key | Keep safe error output; do not switch models/providers without a new approval. |
-| Quiz generation fails | Gemini retrieval, active material coverage, AI STAR latency/status and hourly limit | Keep the safe error; do not save an attempt or relax JSON/citation validation. |
+| Quiz creation fails | Exact topic name and bank capacity for the mastery mix | Add source-checked bank content or deactivate the unsupported topic; do not save an attempt. |
 | Incorrect or missing citations | Retrieval/evaluation evidence and active document version | Pause pilot use if systemic; do not lower citation validation. |
 | Suspected secret exposure | Affected service and repository/log surface | Disable the app if needed, rotate the specific credential, inspect exposure scope and record the incident. Never paste the credential into chat. |
 | Suspected cross-user access | Owner filters, logs without content, automated isolation tests | Disable the app immediately and investigate before restoring access. |
@@ -126,7 +127,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Gemini embeddings are paid and metered; exact deployed cost is not available from the app.
 - AI STAR consumes the purchased balance with a user-reported ×0.1 multiplier and stop-at-zero behavior. Dollar pricing, expiry and storage/retention remain unverified.
 - Questions go to Gemini for embedding. Questions, bounded recent conversation and retrieved excerpts go to AI STAR for generation. Names, email addresses and identity tokens are not intentionally sent.
-- Quiz topic text goes to Gemini for retrieval; topic plus bounded retrieved excerpts go to AI STAR. The student key and email stay outside the graph/provider payload.
+- Starting a quiz sends no topic, course excerpt, identity or quiz content to Gemini or AI STAR.
 - Streamlit Community Cloud and Supabase free services have no class-wide uptime or concurrency guarantee.
 - The measured three-concurrent-request burst completed successfully, but it is not evidence for 120 simultaneous generations.
 

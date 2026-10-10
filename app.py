@@ -39,7 +39,8 @@ from study_guide.ingestion import (
     reindex_document,
     retry_failed_document,
 )
-from study_guide.quizzing import QuizError, generate_quiz, grade_quiz
+from study_guide.question_bank import generate_bank_quiz, has_bank_topic
+from study_guide.quizzing import QuizError, grade_quiz
 
 
 def render_configuration_error() -> None:
@@ -194,12 +195,15 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
     st.title("Adaptive quiz")
     client = build_client(settings)
     try:
-        topics = list_quiz_topics(client)
+        topics = [
+            topic for topic in list_quiz_topics(client)
+            if has_bank_topic(topic.get("name"))
+        ]
     except DatabaseError as exc:
         st.error(str(exc))
         return
     if not topics:
-        st.info("No quiz topics are available yet. Ask an administrator to add one.")
+        st.info("No reviewed quiz topics are available yet.")
         return
 
     topic_by_id = {topic["id"]: topic for topic in topics}
@@ -210,21 +214,17 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         disabled="active_quiz" in st.session_state,
     )
     if st.button(
-        "Generate 7-question quiz",
+        "Start 7-question quiz",
         type="primary",
         disabled="active_quiz" in st.session_state,
     ):
         try:
             _clear_quiz_session()
             mastery = get_topic_mastery(client, identity.user_key, selected_topic_id)
-            with st.spinner("Preparing a fresh quiz from the course material…"):
-                st.session_state.active_quiz = generate_quiz(
+            with st.spinner("Preparing a reviewed quiz from the course material…"):
+                st.session_state.active_quiz = generate_bank_quiz(
                     topic_by_id[selected_topic_id]["name"],
-                    mastery_before=mastery,
-                    gemini_api_key=settings.gemini_api_key,
-                    ai_star_api_key=settings.ai_star_api_key,
-                    database_client=client,
-                    user_key=identity.user_key,
+                    mastery,
                 )
             st.session_state.active_quiz_topic_id = selected_topic_id
             st.session_state.pop("quiz_result", None)

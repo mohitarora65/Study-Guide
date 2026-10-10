@@ -246,11 +246,10 @@ Version 1 is ready for a controlled student pilot only when the approved require
 1. Student selects an active topic and starts a quiz.
 2. The server loads that student's current mastery for the topic.
 3. The mastery band selects the required easy/medium/hard mix.
-4. The topic name is embedded and relevant active PDF chunks are retrieved semantically.
-5. If evidence is insufficient, creation stops with a clear message and stores nothing.
-6. The generator receives the topic, required difficulty mix and bounded retrieved excerpts.
-7. The server validates exactly seven grounded MCQs and performs at most one repair attempt.
-8. The complete quiz is kept in the authenticated Streamlit session until submission or session loss.
+4. The server samples the required mix from the exact topic's bundled, source-checked bank.
+5. Question and option order are randomized while the answer key remains correct.
+6. If the topic or mastery mix lacks enough reviewed questions, creation stops with a clear message and stores nothing.
+7. The complete quiz is kept in the authenticated Streamlit session until submission or session loss.
 
 #### Submission and Mastery Update
 
@@ -267,19 +266,19 @@ Version 1 is ready for a controlled student pilot only when the approved require
 - **QUIZ-TOPIC-01:** Only configured admins can create, rename, activate or deactivate topics.
 - **QUIZ-TOPIC-02:** Topic names must be trimmed, bounded, case-insensitively unique and free of control characters.
 - **QUIZ-TOPIC-03:** Students can start quizzes only for active topics.
-- **QUIZ-TOPIC-04:** Topic lookup uses semantic retrieval over active approved document chunks; no page ranges are stored.
+- **QUIZ-TOPIC-04:** An active topic must exactly match a bundled question-bank topic before students can start it.
 
 #### Quiz Generation
 
-- **QUIZ-GEN-01:** Each attempt contains exactly seven multiple-choice questions generated together in one provider request.
+- **QUIZ-GEN-01:** Each attempt contains exactly seven multiple-choice questions sampled locally without a live provider request.
 - **QUIZ-GEN-02:** Each question has exactly four distinct options and exactly one correct option.
-- **QUIZ-GEN-03:** Each question records one of `easy`, `medium` or `hard`, an explanation and at least one retrieved chunk ID.
-- **QUIZ-GEN-04:** Every cited chunk ID must belong to the retrieved evidence supplied for that generation.
+- **QUIZ-GEN-03:** Each question records one of `easy`, `medium` or `hard`, an explanation and an approved document/page citation.
+- **QUIZ-GEN-04:** Every citation must be fixed in the reviewed bank and point to the approved course PDF.
 - **QUIZ-GEN-05:** Questions must be unique within an attempt after normalization.
-- **QUIZ-GEN-06:** Evidence and generated fields are untrusted; lengths, types, option indexes, citations and duplicate questions must be validated server-side.
-- **QUIZ-GEN-07:** A malformed set gets at most one bounded repair call. If the complete set still fails, the student sees a safe retry message and no attempt is stored.
-- **QUIZ-GEN-08:** If topic evidence is below the existing retrieval threshold, no quiz is generated.
-- **QUIZ-GEN-09:** Fresh question text is generated for every attempt; cross-attempt uniqueness is not guaranteed.
+- **QUIZ-GEN-06:** Bank content is bounded and test-validated for types, lengths, option indexes, citations, difficulty capacity and duplicates.
+- **QUIZ-GEN-07:** Selection is local and makes zero generation or embedding requests.
+- **QUIZ-GEN-08:** If a topic or difficulty pool is unavailable, no quiz is created.
+- **QUIZ-GEN-09:** Questions are sampled without replacement within an attempt; cross-attempt repetition is possible.
 
 #### Grading and Feedback
 

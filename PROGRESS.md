@@ -18,7 +18,17 @@
 | V2-G5 — Roadmap update | APPROVED | `ROADMAP.md` | User said “reduce tokens rest is fine” on 2026-10-10; live evaluation reduced to three quiz generations. |
 | V2-G6 — Implementation phase | COMPLETE — USER APPROVED | `PHASE_PLAN_V2.1.md` | User replied “approve v2.1” on 2026-10-10. Implementation and migration signed off; full live quiz provider reliability remains in V2.2. |
 | V2-G6 — Evaluation/release-readiness phase | PARTIAL — KEPT LOCAL BY USER | `PHASE_PLAN_V2.2.md` | All three capped generations hit the provider output-length limit; no follow-up generation was requested. The later deployment request is handled as a separate proposed phase in `DEPLOYMENT_PLAN_V2.md`. |
-| V2-G7 — Controlled deployment | APPROVED — WAITING FOR USER PUSH | `DEPLOYMENT_PLAN_V2.md` | User approved the plan and confirmed production Supabase ref `kjxixskoeihbitcohhuo`; expected schema/security are already present, so migration was not re-run. Verify the Community Cloud source branch, then user reviews and pushes; Git operations remain user-controlled. |
+| V2-G6 — Bounded reliability follow-up | COMPLETE — LOCAL; BROWSER QA NOT TESTED | `PHASE_PLAN_V2.3.md` | User approved on 2026-10-10. One quiz set passed manual review after a prompt fix; 98 tests pass. Two AI STAR calls and one Gemini embedding used. Authenticated browser/accessibility checks remain untested; no production, Git, migration or deployment actions. |
+| V2-G6 — Remaining topic and local UI QA | PARTIAL — PROVIDER FAILURES | `PHASE_PLAN_V2.4.md` | Two AI STAR calls used (one per topic), both returned safe temporary-unavailable errors; zero embeddings. 98 tests pass. No topic content was validated; V2 is not release-ready. |
+| V2-G6 — Provider reliability and quiz UI QA | PARTIAL — SVD OUTPUT TRUNCATED | `PHASE_PLAN_V2.5.md` | Two AI STAR calls used: Eigenvalues passed structural and manual source review; SVD returned `LengthFinishReasonError` at HTTP 200. 98 tests pass; zero embeddings/database access. Browser auth remains untested. |
+| V2-G6 — Compact quiz output and SVD retest | PARTIAL — OUTPUT STILL TRUNCATED | `PHASE_PLAN_V2.6.md` | Concision instruction and regression assertion added; one SVD call still returned `LengthFinishReasonError` at HTTP 200. 98 tests pass. No retry or database/production/Git action. |
+| V2-G6 — Higher-cap SVD verification | PARTIAL — STILL TRUNCATED | `PHASE_PLAN_V2.7.md` | Cap raised to 5,000; the one SVD call still returned `LengthFinishReasonError` at HTTP 200. 98 tests pass. No retry, DB/browser/production, Git or deployment. |
+| V2-G6 — Raw SVD provider diagnostic | COMPLETE — STRUCTURE PASS; LOW HEADROOM | `PHASE_PLAN_V2.8.md` | One raw SVD call stopped normally at 4,761/5,000 completion tokens; 1,743-character content parsed and passed quiz validation. Content was not stored, so mathematical quality remains unreviewed. 98 tests pass. |
+| V2-G6 — Reviewed SVD verification | PARTIAL — NORMAL PATH TRUNCATED | `PHASE_PLAN_V2.9.md` | One normal-path SVD call at 6,000 tokens still returned `LengthFinishReasonError`; no set could be reviewed. Runtime cap restored to 5,000. 98 tests pass; no retry or external state change. |
+| V2-G6 — Low-effort SVD reliability check | PARTIAL — VALIDATION FAILURE | `PHASE_PLAN_V2.10.md` | One actual provider request returned content without truncation, but validation failed and the capped runner blocked repair. The low-effort runtime change was removed; SVD remains unverified. |
+| V2-G6 — Quiz-model reliability check | PARTIAL — MEDIUM BATCH TIMED OUT | `PHASE_PLAN_QUIZ_MODEL.md` | User approved `gpt-5.6-luna` from AI STAR's live catalog for one bounded SVD evaluation. Easy passed in 6.40s; medium timed out at 30.01s; hard was skipped. The existing quiz model was restored. |
+| V2-G6 — Reviewed question-bank redesign | SOURCE REVIEW COMPLETE — USER SIGN-OFF PENDING | `PHASE_PLAN_QUESTION_BANK.md` | User approved the content-review pass. All 33 answers, explanations and cited pages were visually checked; one Rank question was clarified to use pivot columns from the original matrix. All mastery mixes and 116 tests pass locally; owner/TA sign-off and authenticated browser QA remain. |
+| V2-G7 — Controlled deployment | APPROVED — BLOCKED; NO PUSH | `DEPLOYMENT_PLAN_V2.md` | Production schema/security passed read-only checks. V2.9 still truncated at 6,000; SVD content review and authenticated quiz-flow evidence are missing. Runtime cap restored to 5,000. Git remains user-controlled. |
 
 ## Approval Gates
 
@@ -31,6 +41,80 @@
 | G4 — Architecture and design | APPROVED | `ARCHITECTURE.md`, `DESIGN.md` | User replied “yes” on 2026-10-09. |
 | G5 — Project roadmap | APPROVED | `ROADMAP.md` | User replied “yes” on 2026-10-09. |
 | G6 — Development phases | V1.1–V1.4 APPROVED — COMPLETE; V1.5 APPROVED — PRE-DEPLOYMENT CHECKPOINT | `PHASE_PLAN_V1.1.md`, `PHASE_PLAN_V1.2.md`, `PHASE_PLAN_V1.3.md`, `PHASE_PLAN_V1.4.md`, `PHASE_PLAN_V1.5.md`, `OPERATIONS.md` | V1.5 readiness checks and operations/rollback documentation are complete. A dedicated GitHub repository and explicit public-deployment approval are required next; no external deployment change occurred. |
+
+## Autopilot Handoff — 2026-10-10
+
+- **Mode:** `AUTOPILOT_ACTIVE`, triggered directly by the user with “bhai tu sambhal ab” on 2026-10-10. Scope: continue safe local V2 readiness work, research, documentation and verification. Preserve existing worktree changes. No unattended work continues outside an active session.
+- **DELEGATED_DECISION:** Prefer a read-only check of current official provider/API behavior before proposing another SVD test. Rationale: repeated output-cap increases failed, and a provider reasoning control may address the measured token variance without changing the model or workflow. This decision was within local/read-only scope.
+- **Observed finding:** Current official DeepSeek Chat Completions docs describe reasoning effort `low`/`high`/`max`, with default `high`, plus JSON output and `max_tokens`. LangChain `ChatOpenAI` supports provider-specific parameters. This does not establish AI STAR relay support. Research references: [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/), [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion/), and [LangChain ChatOpenAI reference](https://reference.langchain.com/python/langchain-openai/chat_models/base/BaseChatOpenAI/extra_body).
+- **Relay documentation check:** A targeted public search did not surface official AI STAR API documentation for this parameter. This is inconclusive; only an approved request through the relay can verify pass-through.
+- **Bounded phase prepared and executed:** `PHASE_PLAN_V2.10.md` records the approved low-effort SVD request at the current 5,000-token cap and its validation failure.
+- **Safe verification during this session:** `.venv/bin/python -m pytest -q` — PASS, 98 tests in 2.93s; `.venv/bin/python -m compileall -q app.py study_guide tests` — PASS; `.venv/bin/pip check` — PASS, no broken requirements. Pip cache warning only: the user cache directory is not writable, so cache was disabled. No code change was made.
+- **Authorization granted:** user replied “approve” on 2026-10-10 for the request-parameter behavior change and at most one AI STAR generation request (up to 5,000 output tokens; balance/dollar charge unknown) to test relay compatibility and review SVD.
+- **Still blocked:** authenticated quiz browser-flow evidence has no authorized test-safe account/data target. V2 deployment remains blocked; no push or production change is authorized here. User-only Git actions remain user-run.
+- **Difficulties:** no new user-reported difficulty. Agent-observed: upstream completion truncation persists at a 6,000-token cap; official DeepSeek reasoning controls are documented, but their support through AI STAR is unverified. No fix or provider verification is claimed yet.
+- **V2.10 result:** the sandboxed attempt failed locally in 0.06 seconds and did not reach the provider. The approved network attempt returned content after 54.29 seconds with no length/rejected-parameter exception, then failed existing quiz validation and requested repair. The one-call cap blocked repair. Zero embeddings/database calls; no questions were retained. The low-effort runtime change was removed because a usable SVD set was not verified.
+- **V2.10 verification:** focused quiz tests passed (7). After restoring the prior runtime request settings, the full suite passed (98 tests in 2.46s); `compileall`, `pip check` and `git diff --check` passed. Pip emitted only the known non-writable user-cache warning and reported no broken requirements.
+
+### V2.11 result — 2026-10-10
+
+User replied “approve” for the proposed two-call maximum. One low-effort SVD request produced seven structurally valid questions in 15.44 seconds with the required 1/3/3 labels. No repair, embedding or database call occurred. Manual source review failed Q6: two distinct options are algebraically equivalent because scalar multiplication commutes. Other keyed answers/citations are source-supported; hard labels mostly cover recall. The temporary request change was removed because the set did not pass source review. Artifact: ignored `evaluation/quiz_results/v211_svd_review.json`. Agent-observed lesson: text uniqueness does not guarantee mathematically distinct options. No new user-reported difficulty. V2 deployment remains blocked.
+
+### Pending authorizations
+
+**Deployment continuation — USER_APPROVED / USER GIT ACTION REQUIRED, 2026-10-10:** after receiving the source-review result and next-gate explanation, the user directed “thik hai ab aage ka kaam kro and jaldi deploy kro.” This authorizes the controlled deployment direction, but does not override the project rule that all Git mutations are user-run. Pre-deploy local evidence: 116 tests passed in 2.66 seconds; compilation, `pip check` and `git diff --check` passed; the source secret-pattern scan returned no matches outside explicitly excluded secrets/artifacts; local Streamlit health returned `ok` on ports 8501 and 8502; the public URL returned Streamlit's authentication redirect. Added `graphify-out/` and `.serena/` to `.gitignore` to prevent accidental publication of local tooling artifacts. Browser automation was unavailable, so authenticated quiz/browser QA remains NOT TESTED. No production database write, credential/OAuth change, Git mutation or deployment was performed by Codex. Next action is the user-controlled review/stage/commit/push checkpoint, followed by deployed smoke testing.
+
+**Question-bank redesign — USER_APPROVED / SOURCE REVIEW COMPLETE, 2026-10-10:** user replied “approve all” to the proposed pre-generated, reviewed question-bank redesign and later approved the content-review pass. Added 11 questions per approved topic (4 easy, 4 medium, 3 hard) with citations to `lA notes.pdf`; student quiz creation now makes zero AI STAR, Gemini, retrieval or database-content calls before submission. All 33 keyed answers, explanations and citation pages were visually checked against the PDF. One Rank medium question was clarified to select the matching pivot columns of the original matrix rather than columns of rref(A). Questions and option order are randomized, and unsupported topics are hidden/fail safely. Summary-only attempt persistence is unchanged. Focused tests: 24 passed. Full suite after review: 116 passed in 2.10s; compilation, `pip check` and `git diff --check` passed. No migration, production write, external provider request, deployment or Git mutation. Agent-observed difficulties: the existing Graphify map was stale around old repair logic, an old unsupported test topic was correctly filtered, and the Rank elimination wording was ambiguous; direct caller inspection, a regression test and the wording correction resolved them. No new user-reported difficulty. Owner/TA sign-off and authenticated browser QA remain release gates.
+
+**Quiz-model trial — USER_APPROVED / PARTIAL, 2026-10-10:** user said “ok do it” to the proposed provider-supported setup and one bounded end-to-end SVD evaluation, then reaffirmed autopilot with “bhai tu sambhal ab.” An authenticated read-only catalog request listed 41 AI STAR models; `gpt-5.6-luna` was selected for quiz generation only while the general answer model remained unchanged. Easy validated in 6.40s; the medium batch timed out after 30.01s (`OpenAITimeoutError`); exactly two generation calls, zero retries/repairs, hard skipped. No complete set or source review. The candidate was removed and `deepseek-v4-flash` restored. Artifact: ignored `evaluation/quiz_results/gpt56_luna_batched_svd.json`. No database, embeddings, student data, deployment or Git mutation. Agent-observed cause remains unknown; no new user-reported difficulty.
+
+**Quiz-model phase close-out:** full suite passed (103 tests in 2.55s); compilation, `pip check` and `git diff --check` passed. The only pip output was the known non-writable cache warning. The live-call authorization is consumed. Further provider calls, another model switch, or a quiz workflow redesign require a new concrete approval; V2 deployment remains blocked.
+
+**Non-thinking trial close-out:** after restoration, 12 focused tests passed in 0.69s; compilation and `git diff --check` passed. Corrected the evaluation diagnostic gap: future batch responses are retained bounded by `MAX_RAW_RESPONSE_CHARS` only in ignored synthetic artifacts, with raw text omitted from console summaries. The discarded response from this trial is unrecoverable locally; no additional call was made to obtain it. Lesson: persist rejected synthetic output before validation so another experiment is not needed solely to discover the validation cause.
+
+**Non-thinking trial — USER_APPROVED / PARTIAL, 2026-10-10:** user said “approve both” for the temporary mode change and one bounded SVD evaluation. First easy batch returned invalid JSON in 24.09s; exactly one call, zero retry/repair, medium/hard batches skipped. Metadata: ignored `evaluation/quiz_results/nonthinking_batched_svd.json`. No complete set for source review. Invalid raw content was not retained by the runner; precise formatting defect and whether AI STAR honored the thinking toggle remain unknown. Restored prior thinking behavior; kept the verified `max_tokens` wire correction and batching. No embeddings/database access, production change, deployment or Git mutation. Agent-observed malformed JSON despite requested JSON mode is unresolved; no new user-reported difficulty. The trial authorization is consumed/completed and does not grant new calls.
+
+**AUTOPILOT reaffirmed, 2026-10-10:** user repeated “bhai tu sambhal ab”; existing bounded autonomy remains active without authorizing paid calls or provider/model switches.
+
+**DELEGATED_DECISION — token-cap compatibility correction:** installed `langchain-openai==1.7.0` converts its `max_tokens` constructor field to `max_completion_tokens` in `ChatOpenAI._get_request_payload`. Official DeepSeek Chat Completions docs specify `max_tokens`; AI STAR's handling of the rewritten field is unknown. Preserve the already approved 2,000-token cap under the provider-documented name using `extra_body` (no additional token allowance, model change, thinking control or live request). A local HTTP mock checks the actual serialized request and JSON mode without network access. This discrepancy is observed; its role in prior failures is unverified. Next live experiment remains queued for HIGH authorization.
+
+**Next experiment prepared:** `PHASE_PLAN_NONTHINKING_QUIZ.md` proposes the existing model with `thinking.type=disabled`, documented `max_tokens=2000`, three batch calls maximum and 30-second transport timeout each. An offline mock verified both fields reach the serialized request with JSON mode; no network/provider call was made. AI STAR forwarding/honoring the toggle remains unknown. Paid trial and temporary mode change await explicit authorization.
+
+**Compatibility phase verification:** 12 focused tests passed in 0.70s; full suite 103 passed in 2.39s; compilation and `git diff --check` passed. No new live request, deployment or Git mutation. Agent-observed lesson: assert serialized provider payload at the HTTP boundary; constructor kwargs alone missed LangChain's token-field renaming. No new user-reported difficulty.
+
+**Bounded batch strategy — USER_APPROVED, 2026-10-10:** user said “approve do it” for three calls maximum, 2,000 output tokens and 30 seconds per call, immediate batch validation, no repair/retry, one complete synthetic SVD evaluation. Saved plan: `PHASE_PLAN_BATCHED_QUIZ.md`. Implemented batching for all approved mastery mixes; final UI/grading/persistence still receives seven questions. Full suite: 102 tests pass in 2.60s. The authorized live evaluation is complete; result follows.
+
+**Bounded batch result — PARTIAL:** easy batch validated in 13.90s; medium batch hit `LengthFinishReasonError` in 22.10s. Exactly two provider calls; hard batch skipped. Total 36.01s, no retries/repairs, embeddings, database access, partial quiz display, Git mutation or deployment. Metadata: ignored `evaluation/quiz_results/batched_svd.json`. No full set existed for source review. Batching implementation remains local; reliability acceptance failed. Agent-observed lesson: smaller requests still truncate at the approved 2,000-token cap, so the current reasoning/provider behavior needs a consequential decision before further live work. Underlying token allocation is unverified; no new user-reported difficulty. Deployment stays blocked.
+
+**Batch phase final checks:** full suite 102 passed in 2.60s; compilation, dependency consistency and `git diff --check` passed. Updated architecture, PRD, README, roadmap and operations to describe the approved batch/no-repair behavior. No extra dependency or speculative mathematical-expression parser was introduced.
+
+Minimal-diagnostic local checks: compilation and `git diff --check` passed. Invoking the runner again hit its existing-artifact guard before configuration or networking; no second provider request occurred.
+
+**DELEGATED_DECISION — local MCQ-quality adjustment, 2026-10-10:** user said “continue” after the proposed prompt fix. Scope: strengthen the shared generation/repair prompt to require exactly one mathematically correct option, prohibit equivalent mathematical distractors (including reordered scalar factors), and define easy as recall, medium as application, hard as reasoning/calculation supported by evidence. No provider call, new dependency or validator relaxation is authorized by this local step. Expected affected paths: `study_guide/quizzing.py`; both graph calls already reuse `_prompt_messages`. Verification: focused quiz tests and compilation. Live effectiveness remains unverified until a separately approved evaluation. Agent-observed cause: V2.11 offered equivalent scalar-factor expressions as different answers; plain string uniqueness cannot establish mathematical uniqueness.
+
+**Local adjustment verification:** PASS — 7 focused quiz tests in 0.60s, compilation and `git diff --check`. No claim is made that these checks establish generated-question quality.
+
+**Next bounded evaluation plan — PROPOSED:** temporarily use low reasoning effort with the strengthened prompt, make exactly one SVD request at the existing 5,000-token cap using local pages 49–51 and synthetic citations, disable repair/retry for this evaluation, retain the bounded synthetic result in the ignored artifact directory, and review all answers, mathematical option equivalence, citations and difficulty against the source. No embeddings, database access, browser login, deployment or Git changes. Keep low effort only if source review passes; otherwise restore it. Approval is required for this specific provider-behavior trial and one balance-backed request; exact charge is unknown.
+
+**V2.12 approval — USER_APPROVED:** user replied “approve” to the exact single-call plan above on 2026-10-10. That bounded evaluation is complete; authorization does not extend to additional calls or deployment.
+
+**V2.12 result — PARTIAL, 2026-10-10:** exactly one AI STAR SVD request with low reasoning effort and the strengthened MCQ prompt timed out after 90.49 seconds (`OpenAITimeoutError`). No quiz content, repair/retry, embeddings or database access occurred. Safe metadata is retained under ignored `evaluation/quiz_results/v212_svd_review.json`. The temporary low-effort setting was removed because source review could not pass; the local prompt quality improvement remains. Agent-observed difficulty: provider response time exceeded the existing 90-second boundary; underlying cause is unknown. No new user-reported difficulty. Further blind retesting is not recommended; provider reliability and authenticated quiz browser evidence remain open, and deployment is blocked.
+
+**V2.12 local verification:** 7 focused quiz tests passed in 0.62 seconds; compilation and `git diff --check` passed after restoration. No deployment or Git mutation occurred.
+
+**Provider reliability investigation — 2026-10-10:** user replied “approve” to investigating reliability. Local evaluation records distinguish three failure modes: provider `finish_reason=length`, generated-question quality failures, and one transport timeout. Low-effort SVD attempts took 54.29s (validation failure), 15.44s (structural pass, source-review failure), and 90.49s (timeout); these are individual observations, not a statistical reliability estimate. The adapter has zero transport retries and a 90-second timeout. An unauthenticated GET to `https://ai.starimg.ru/v1/models` returned the expected HTTP 401 in 1.288s (DNS 0.254s, TCP 0.475s, TLS 0.971s), confirming current gateway reachability without credentials, generation or balance use. It does not verify authenticated model inference. Queueing, relay/upstream stalls and reasoning behavior remain unproven causes; no timeout increase or successful reliability fix is claimed.
+
+**Concrete next diagnostic — PROPOSED:** one AI STAR request using the existing model and synthetic instruction to return only `{"ok":true}`, low reasoning effort, a 1,000-output-token cap, a 30-second timeout and zero retries. Record only served model, finish reason, safe usage counters, latency, JSON success and transport exception/cause classes; no course/student content or database access. This tests basic authenticated generation, not SVD quality or class capacity. A new balance-backed call needs specific approval under the project contract; exact charge is unknown. A successful minimal diagnostic alone does not justify deployment.
+
+**Minimal diagnostic — USER_APPROVED / PASS, 2026-10-10:** user replied “approve” to this exact one-call scope. `evaluation/run_provider_reliability_diagnostic.py` made one request with zero retries and returned the expected `{"ok":true}` in 5.51s, served model `DeepSeek-V4-Flash-0731`, finish reason `stop`. Provider usage reports prompt 10, completion 5, total 74; counts are retained as reported and are not arithmetically reconciled or treated as billed usage. Metadata-only artifact: ignored `evaluation/quiz_results/provider_reliability_diagnostic.json`. No course/student content, embeddings or database access. The runner refuses to run again once its artifact exists. Basic authenticated generation works; SVD timeout cause, task-level reliability and question quality remain unverified. No new user-reported difficulty and no new transport failure during this diagnostic. Next: use these results to choose a bounded quiz-specific strategy rather than treating a tiny successful request as release evidence; provider/model/workflow changes and additional calls remain separately gated.
+
+V2.11 final verification: 98 tests passed in 2.36 seconds; compilation, dependency consistency and `git diff --check` passed. The evaluation runner now records each call's validation category and refuses to reuse an existing result file. No deployment or Git mutation occurred.
+
+| ID | Proposed action | Reason / dependency | Impact / cost / security risk | Exact permission needed | Safe alternative | Status |
+|---|---|---|---|---|---|---|
+| P-1 | Owner/teaching-assistant sign-off on the 33-question bundled bank | Agent source review and automated contract tests cannot replace owner content sign-off | Incorrect wording or difficulty could affect students | Approve the reviewed bank before release | Keep V2 local | PENDING; 33/33 source-reviewed |
+| P-2 | Authenticated local quiz browser QA with a test-safe account and data target | Real authenticated quiz navigation/accessibility remains unverified | May expose account identity and create attempt data depending on the target | Identify and approve a test-safe account plus local/development data target | Rely on mocked AppTests and keep the browser-evidence limitation | PENDING |
+| P-3 | Publish V2 through the configured GitHub/Streamlit branch | Deployment requires user-controlled Git push after readiness is cleared | Public application change; push may trigger production deployment | User reviews/stages/commits/pushes after blockers clear | Keep current V1 deployment | BLOCKED; USER-ONLY |
 
 Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `gemini-embedding-2` at 768 dimensions. The user approved AI STAR `deepseek-v4-flash` at `https://ai.starimg.ru/v1`; user reports OpenAI-compatible chat completions/JSON output, a `×0.1` token-balance deduction, and request blocking at zero. The user confirmed that requests stop at zero. Dollar price, remaining balance/expiry, training claim, and storage/retention terms are not independently verified. User explicitly accepts sending student questions, bounded conversation, and retrieved excerpts despite unknown retention. Synthetic live compatibility and grounded-answer tests passed on 2026-10-09. Usage on the compatibility probe reported prompt 49/completion 61/total 169; exact balance deduction is unclear. The locally configured key was used for two approved synthetic API calls and was not printed or copied; we did not compare it with the earlier key pasted into chat, so whether it is the same credential is unknown.
 
@@ -52,7 +136,7 @@ Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `
 ## Current Status
 
 - Planning documents created: `PROJECT_BRIEF.md`, `RESEARCH.md`, `PRD.md`, `TECH_STACK_DECISION.md`, `ARCHITECTURE.md`, `DESIGN.md`, `ROADMAP.md`, `PHASE_PLAN.md`, `PROGRESS.md`.
-- V2.1 adaptive quiz is implemented locally: admin topics, seven grounded MCQs, local grading, rolling mastery, summary-only history, student progress and admin email lookup/deletion. Migration `003_adaptive_quiz.sql` is applied to the confirmed development project. The feature is awaiting user sign-off and is not deployed.
+- V2.1 adaptive quiz is implemented and user-approved: admin topics, seven grounded MCQs, local grading, rolling mastery, summary-only history, student progress and admin email lookup/deletion. Migration `003_adaptive_quiz.sql` is applied to the development project. V2.3 and V2.5 each verified one synthetic quiz set locally; V2.2, V2.4–V2.7 and V2.9–V2.10 remain partial, and V2 is not deployed.
 - V1.1 application foundation, configuration boundary, authentication policy, initial schema, tests and README: implemented locally.
 - Project-local `.venv`: created with installed Python 3.13 because Python 3.12 is not installed locally; code remains compatible with the approved Python 3.12 deployment target.
 - External services and deployment: Google OAuth consent/login was verified. The approved additive migration was applied to Supabase project `kjxixskoeihbitcohhuo`; no provider configuration or deployment was performed.
@@ -71,7 +155,7 @@ Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `
 
 ## V2.1 Adaptive Quiz Execution Report — 2026-10-10
 
-**Phase status:** COMPLETE — user approved on 2026-10-10. V2.2 remains the next planned phase for live quiz quality/reliability evaluation; no deployment was authorized.
+**Phase status:** COMPLETE — user approved on 2026-10-10. The later V2.2 evaluation remains partial; the V2.3 bounded follow-up is recorded below. No deployment was authorized.
 
 - Added LangChain/LangGraph pins, normalized verified email identity, strict quiz-domain validation and a deterministic retrieve/generate/validate/one-repair graph with no graph persistence or model-controlled writes.
 - Added private quiz topics/profiles/mastery/attempt-summary tables. Browser roles are revoked; atomic completion is idempotent and profile deletion cascades only quiz data.
@@ -81,6 +165,65 @@ Provider clarification approved on 2026-10-09: V1.2/V1.3 retrieval uses Google `
 - Deterministic tests cover exact mixes, scoring/mastery, fabricated citations, one repair, insufficient evidence, identity-free payloads, summary-only persistence and the full Streamlit generate/answer/submit/result flow.
 - Verification: 91 tests pass; compileall and `pip check` pass; local Streamlit health returned HTTP 200 in 1.3 ms; signed-out page shows the quiz-email disclosure. Authenticated browser navigation and live full-quiz quality/latency remain unverified.
 - No Git mutation or deployment occurred.
+
+## V2.4 Remaining Topic and Local UI QA — 2026-10-10
+
+**Status:** PARTIAL — both capped topic generations failed safely. V2 remains not release-ready.
+
+- Evaluated Eigenvalues and eigenvectors (mastery 60; local course pages 43–44) and Singular value decomposition (mastery 85; pages 49–51) using only local PDF evidence and synthetic citation IDs.
+- Exactly two AI STAR calls were made, one per topic; both returned the app's safe “temporarily unavailable” error. No retry/repair or provider switch was attempted. Zero Gemini embedding calls and zero database access. Safe outcomes and counts are recorded in ignored `evaluation/quiz_results/v24_followup.json`.
+- Neither topic produced a quiz set, so question quality, answer/explanation correctness, citations and difficulty mixes could not be manually reviewed. The successful V2.3 set remains the only manually reviewed V2 set.
+- Full local suite (including synthetic student/admin AppTests): 98 passed in 2.49s. `compileall`, `pip check` and `git diff --check` passed.
+- Browser authenticated quiz/focus checks remain not tested because available sessions were production V1 or signed out/stale. No production data access/write, real attempt, migration, Git mutation or deployment occurred.
+- Next: the V2.5 read-only provider check and capped generation evaluation, plus the V2.6 concise-output SVD retest, are complete. SVD remains unverified due output truncation; no V2 deployment until representative generation and quiz-path evidence are complete.
+- Read-only follow-up on 2026-10-10: authenticated AI STAR `/models` GET returned HTTP 200 and listed `deepseek-v4-flash` (41 models). This confirms endpoint/key access only, not chat generation health.
+
+## V2.5 Provider Reliability and Quiz UI QA — 2026-10-10
+
+**Status:** PARTIAL — Eigenvalues passed review; SVD generation was truncated. V2 remains not release-ready.
+
+- Used exactly two AI STAR calls, one per remaining topic, with local PDF pages 43–44 and 49–51 and synthetic citation IDs. Zero Gemini embeddings, database access, retries or graph repairs. Evidence: ignored `evaluation/quiz_results/v25_followup.json`.
+- Eigenvalues and eigenvectors generated seven distinct questions with the expected 2/4/1 difficulty mix. Structural validation passed; manual review confirmed every answer, explanation and page citation against pages 43–44.
+- SVD returned `LengthFinishReasonError` with HTTP 200 at the 3,500-token output cap. The configured key/model can call chat generation, but the current output budget is insufficient for this set. No retry was made.
+- The full suite passed: 98 tests in 2.53s; compileall, `pip check` and `git diff --check` passed. Browser auth/focus QA remains not tested; no authorized safe browser account/target was available.
+- No app code change, production access/write, real attempt, migration, Git action or deployment occurred. Next step needs a separate phase approval for a concise-output adjustment and one SVD retest, plus explicit test-account/data-target approval for browser QA.
+
+## V2.6 Compact Quiz Output and SVD Retest — 2026-10-10
+
+**Status:** PARTIAL — SVD still truncates at the configured output cap. V2 remains not release-ready.
+
+- Added a concise generation instruction and regression assertion. Existing token cap (3,500), response schema and validation limits remain unchanged.
+- The single synthetic SVD call used local PDF pages 49–51 and synthetic citations; it returned `LengthFinishReasonError` with HTTP 200. No repair/retry, embeddings or DB access. See ignored `evaluation/quiz_results/v26_svd_retest.json`.
+- Targeted quiz tests: 7 passed. Full suite: 98 passed in 2.45s; compileall, `pip check` and `git diff --check` passed.
+- No production/browser login, database operation, migration, real attempt, Git action or deployment occurred. Raising the output cap or making another call requires separate approval; authenticated browser QA still needs an authorized test-safe account/data target.
+
+## V2.7 Higher-Cap SVD Verification — 2026-10-10
+
+**Status:** PARTIAL — SVD still truncates at 5,000 output tokens. V2 remains not release-ready.
+
+- Raised the quiz output cap from 3,500 to 5,000; the existing adapter test verifies the configured value reaches `ChatOpenAI`.
+- The single approved SVD call used local pages 49–51 and synthetic citations. It returned `LengthFinishReasonError` with HTTP 200 after 21.83 seconds. No completed set, retry/repair, embedding or database access. Evidence: ignored `evaluation/quiz_results/v27_svd_retest.json`.
+- Targeted quiz tests: 7 passed. Full suite: 98 passed in 2.47s; compileall, `pip check` and `git diff --check` passed.
+- No production/browser login, database operation, migration, real attempt, Git action or deployment occurred. Further blind cap increases are not recommended without provider-specific diagnostics; authenticated browser QA still needs a test-safe account/target.
+- Read-only inspection of the installed OpenAI client confirmed `LengthFinishReasonError` is raised only when the provider choice reports `finish_reason="length"`; this is upstream truncation before application quiz validation, not a local JSON validator defect.
+
+## V2.8 Raw SVD Provider Diagnostic — 2026-10-10
+
+**Status:** COMPLETE — raw structure passed; provider reasoning headroom is low.
+
+- One approved raw SVD call returned `finish_reason="stop"` in 21.17s. Usage: 1,589 prompt, 4,761 completion and 6,409 total tokens; 1,408 prompt tokens cached. Visible response length was 1,743 characters.
+- JSON parsing and the existing seven-question validator passed with the required 1/3/3 difficulty mix. Response content was intentionally not displayed or persisted, so mathematical/source quality was not reviewed.
+- Zero retries, repairs, embeddings or database calls. Full suite: 98 passed in 2.44s; compileall, `pip check` and `git diff --check` passed.
+- Diagnosis: application validation is not the root issue; variable provider-side reasoning consumes nearly the entire 5,000-token allowance. Step 2 needs separate approval for measured headroom or a documented reasoning control and one content-retaining SVD review call.
+
+## V2.9 Reviewed SVD Verification — 2026-10-10
+
+**Status:** PARTIAL — normal application path still truncates; no SVD content review.
+
+- The single approved normal-path SVD call used a temporary 6,000-token cap with local pages 49–51 and synthetic citations. It returned `LengthFinishReasonError` at HTTP 200 after 25.39 seconds. No retry/repair, embedding or DB access occurred.
+- No completed set was available for structural or mathematical review. The runtime cap was restored to 5,000 because 6,000 provided no reliability benefit and increased possible usage.
+- Targeted quiz tests: 7 passed. Full suite: 98 passed in 2.40s; compileall, `pip check` and `git diff --check` passed.
+- No production/browser login, database operation, migration, real attempt, Git action or deployment occurred. Further progress requires an approved provider reasoning control, provider/model change, or multi-call workflow design.
 
 ## V2.2 Evaluation Report — 2026-10-10
 
