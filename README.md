@@ -8,7 +8,9 @@ A deployed Streamlit study assistant for IIT Indore's Mathematics for AI/ML cour
 
 V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. Quiz creation samples a bundled, source-checked bank instead of waiting for live model generation. V2 is deployed from `main`; the user confirmed the corrected authenticated quiz topic UI in production on 2026-10-11.
 
-V3 is implemented locally and its additive schema migration is applied in production, but the application changes are not deployed. It classifies uploads as Theory or Questions, assigns Mid Sem / End Sem / Class Quiz coverage, scopes Study retrieval, extracts deterministic question drafts with page provenance, requires admin review, and prefers approved uploaded questions while retaining the bundled bank as fallback.
+V3 is deployed from `main`, and its additive schema migration is applied in production. It classifies uploads as Theory or Questions, assigns Mid Sem / End Sem / Class Quiz coverage, scopes Study retrieval, extracts deterministic question drafts with page provenance, requires admin review, and prefers approved uploaded questions while retaining the bundled bank as fallback.
+
+The final UI polish is implemented locally: new chats accept an optional name and otherwise use the first question, saved chats can be renamed, the Study and Quiz headings are friendlier, and the uploader now displays the real 25 MB limit. Quick Quiz retains the seven-question mastery workflow; Custom Quiz lets students choose topics, 5/7/10 questions and difficulty levels without writing practice results to mastery/history.
 
 The bundled bank contains 11 questions for each approved topic—four easy, four medium and three hard—so every mastery mix can be assembled locally. Question and option order are randomized. Unsupported topics fail safely until source-checked questions are added. See `PHASE_PLAN_QUESTION_BANK.md`.
 
@@ -60,7 +62,7 @@ Apply the migrations in filename order only after confirming the target is a dev
 1. `supabase/migrations/001_initial.sql` creates the document, ingestion and chat tables.
 2. `supabase/migrations/002_ingestion.sql` adds ingestion metrics, the private `course-pdfs` bucket, atomic activation/deletion functions and active-version vector search.
 3. `supabase/migrations/003_adaptive_quiz.sql` adds private quiz topics, profiles, mastery and summary attempts plus atomic completion/profile-deletion functions.
-4. `supabase/migrations/004_study_modes_and_questions.sql` adds document classification, private question drafts and coverage-scoped retrieval. It is prepared locally and must not be applied to production without explicit approval and a backup/rollback check.
+4. `supabase/migrations/004_study_modes_and_questions.sql` adds document classification, private question drafts and coverage-scoped retrieval. It was applied to production with explicit approval on 2026-10-11.
 
 All migrations preserve the server-only boundary: browser roles cannot access protected tables/functions, and the source-PDF bucket is private.
 
@@ -69,6 +71,7 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 - Admins create, rename and activate topic names.
 - A student selects a topic; the server samples source-checked questions for that exact topic without a live provider call.
 - Every quiz contains exactly seven unique MCQs with four distinct options, the mastery-selected difficulty mix and citations to the approved PDF pages.
+- A practice-only custom quiz can combine selected topics, use 5, 7 or 10 questions, and include selected difficulty levels. It does not update mastery or quiz history.
 - The bundled bank currently covers Rank and fundamental subspaces, Eigenvalues and eigenvectors, and Singular value decomposition. Other topic names fail safely until reviewed content is added.
 - Answers are graded locally. Supabase stores only attempt summaries and rolling mastery: `60%` latest score plus `40%` previous mastery after the first attempt.
 - Students see only their own progress. Admins can filter progress by institutional email and delete that quiz profile and its summary history.
@@ -137,5 +140,5 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 - V2 is deployed. The user confirmed the corrected authenticated topic UI; a complete production quiz submission and student/admin progress synchronization were not explicitly recorded.
 - Streamlit Community Cloud and Supabase free hosting do not guarantee capacity or uptime for simultaneous class-wide use.
 - Historical live-generation trials were unreliable, so the student path now uses the bundled bank. Automated checks and source review cover all 33 questions. Quiz keyboard/focus behavior and a fully recorded production submission/progress-sync flow remain pending. See `PHASE_PLAN_QUESTION_BANK.md` and `OPERATIONS.md`.
-- V3 deterministic extraction recognizes numbered questions, A–D option lines and simple answer-key lines. It does not infer answers, OCR scans, or reliably reconstruct complex multi-column layouts; admins must complete and review every extracted MCQ. The production schema is migrated; application deployment, deliberate document reclassification and authenticated browser QA are pending.
+- V3 deterministic extraction recognizes numbered questions, A–D option lines and simple answer-key lines. It does not infer answers, OCR scans, or reliably reconstruct complex multi-column layouts; admins must complete and review every extracted MCQ. The production schema and V3 application are deployed; a fully recorded extraction/review/custom-quiz production flow remains pending.
 # Study-Guide

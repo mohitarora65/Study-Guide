@@ -3,8 +3,13 @@ import random
 
 import pytest
 
-from study_guide.question_bank import QUESTION_BANK, generate_bank_quiz, has_bank_topic
-from study_guide.quizzing import QuizError, difficulty_mix
+from study_guide.question_bank import (
+    QUESTION_BANK,
+    generate_bank_quiz,
+    generate_custom_bank_quiz,
+    has_bank_topic,
+)
+from study_guide.quizzing import QuizError, difficulty_mix, grade_quiz
 
 
 @pytest.mark.parametrize("topic", QUESTION_BANK)
@@ -74,3 +79,29 @@ def test_approved_source_question_is_preferred_and_cited() -> None:
 
     uploaded = next(question for question in quiz.questions if question.prompt == row["prompt"])
     assert uploaded.citations == ({"display_name": "questions.pdf", "page_number": 9},)
+
+
+def test_custom_quiz_respects_count_and_balanced_selected_difficulties() -> None:
+    quiz = generate_custom_bank_quiz(
+        {
+            "Rank and fundamental subspaces": [],
+            "Singular value decomposition": [],
+        },
+        5,
+        ("easy", "hard"),
+        rng=random.Random(4),
+    )
+
+    assert len(quiz.questions) == 5
+    assert quiz.difficulty_mix == {"easy": 3, "medium": 0, "hard": 2}
+    assert grade_quiz(quiz, [question.correct_index for question in quiz.questions]) == 5
+
+
+def test_custom_quiz_rejects_an_insufficient_reviewed_pool() -> None:
+    with pytest.raises(QuizError, match="Not enough reviewed questions"):
+        generate_custom_bank_quiz(
+            {"Singular value decomposition": []},
+            10,
+            ("hard",),
+            rng=random.Random(1),
+        )

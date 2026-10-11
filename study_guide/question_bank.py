@@ -78,15 +78,10 @@ QUESTION_BANK: dict[str, tuple[_BankQuestion, ...]] = {
 }
 
 
-def generate_bank_quiz(
+def _question_pool(
     topic: str,
-    mastery_before: int | None,
-    *,
-    source_questions: list[dict[str, Any]] | None = None,
-    rng: Any | None = None,
-) -> GeneratedQuiz:
-    topic = validate_topic_name(topic)
-    mix = difficulty_mix(mastery_before)
+    source_questions: list[dict[str, Any]] | None,
+) -> tuple[list[_BankQuestion], tuple[_BankQuestion, ...], dict[str, dict[str, Any]]]:
     bank_questions = QUESTION_BANK.get(topic.casefold())
     reviewed: list[_BankQuestion] = []
     citations: dict[str, dict[str, Any]] = {}
@@ -123,18 +118,18 @@ def generate_bank_quiz(
         question for question in (bank_questions or ())
         if question.prompt.casefold() not in {item.prompt.casefold() for item in reviewed}
     )
-    rng = rng or SystemRandom()
-    selected: list[_BankQuestion] = []
-    for level, count in mix.items():
-        source_candidates = [question for question in reviewed if question.difficulty == level]
-        fallback_candidates = [question for question in fallback if question.difficulty == level]
-        if len(source_candidates) + len(fallback_candidates) < count:
-            raise QuizError("No reviewed questions are available for this mastery level yet.")
-        source_count = min(count, len(source_candidates))
-        selected.extend(rng.sample(source_candidates, source_count))
-        selected.extend(rng.sample(fallback_candidates, count - source_count))
-    rng.shuffle(selected)
+    return reviewed, fallback, citations
 
+
+def _render_quiz(
+    topic: str,
+    mastery_before: int | None,
+    mix: dict[str, int],
+    selected: list[_BankQuestion],
+    citations: dict[str, dict[str, Any]],
+    rng: Any,
+) -> GeneratedQuiz:
+    rng.shuffle(selected)
     rendered: list[QuizQuestion] = []
     for question in selected:
         order = list(range(4))
@@ -145,13 +140,96 @@ def generate_bank_quiz(
             correct_index=order.index(question.correct_index),
             difficulty=question.difficulty,
             explanation=question.explanation,
-            citations=(citations.get(question.prompt, {"display_name": "lA notes.pdf", "page_number": question.page}),),
+            citations=(citations.get(question.prompt, {
+                "display_name": "lA notes.pdf", "page_number": question.page,
+            }),),
         ))
     return GeneratedQuiz(
         topic=topic,
         mastery_before=mastery_before,
         difficulty_mix=mix,
         questions=tuple(rendered),
+    )
+
+
+def generate_bank_quiz(
+    topic: str,
+    mastery_before: int | None,
+    *,
+    source_questions: list[dict[str, Any]] | None = None,
+    rng: Any | None = None,
+) -> GeneratedQuiz:
+    topic = validate_topic_name(topic)
+    mix = difficulty_mix(mastery_before)
+    reviewed, fallback, citations = _question_pool(topic, source_questions)
+    rng = rng or SystemRandom()
+    selected: list[_BankQuestion] = []
+    for level, count in mix.items():
+        source_candidates = [question for question in reviewed if question.difficulty == level]
+        fallback_candidates = [question for question in fallback if question.difficulty == level]
+        if len(source_candidates) + len(fallback_candidates) < count:
+            raise QuizError("No reviewed questions are available for this mastery level yet.")
+        source_count = min(count, len(source_candidates))
+        selected.extend(rng.sample(source_candidates, source_count))
+        selected.extend(rng.sample(fallback_candidates, count - source_count))
+    return _render_quiz(topic, mastery_before, mix, selected, citations, rng)
+
+
+def generate_custom_bank_quiz(
+    topic_sources: dict[str, list[dict[str, Any]]],
+    question_count: int,
+    difficulties: tuple[Difficulty, ...],
+    *,
+    rng: Any | None = None,
+) -> GeneratedQuiz:
+    if question_count not in {5, 7, 10}:
+        raise QuizError("Choose 5, 7 or 10 questions.")
+    selected_levels = tuple(dict.fromkeys(difficulties))
+    if not selected_levels or any(
+        level not in {"easy", "medium", "hard"} for level in selected_levels
+    ):
+        raise QuizError("Choose at least one valid difficulty.")
+    if not topic_sources:
+        raise QuizError("Choose at least one quiz topic.")
+
+    reviewed: list[_BankQuestion] = []
+    fallback: list[_BankQuestion] = []
+    citations: dict[str, dict[str, Any]] = {}
+    topics: list[str] = []
+    for raw_topic, source_questions in topic_sources.items():
+        topic = validate_topic_name(raw_topic)
+        source_pool, fallback_pool, source_citations = _question_pool(topic, source_questions)
+        topics.append(topic)
+        reviewed.extend(source_pool)
+        fallback.extend(fallback_pool)
+        citations.update(source_citations)
+
+    reviewed = list({question.prompt.casefold(): question for question in reviewed}.values())
+    reviewed_prompts = {question.prompt.casefold() for question in reviewed}
+    fallback = list({
+        question.prompt.casefold(): question
+        for question in fallback
+        if question.prompt.casefold() not in reviewed_prompts
+    }.values())
+
+    rng = rng or SystemRandom()
+    base, remainder = divmod(question_count, len(selected_levels))
+    mix = {level: 0 for level in ("easy", "medium", "hard")}
+    for index, level in enumerate(selected_levels):
+        mix[level] = base + (index < remainder)
+
+    chosen: list[_BankQuestion] = []
+    for level, count in mix.items():
+        source_candidates = [question for question in reviewed if question.difficulty == level]
+        fallback_candidates = [question for question in fallback if question.difficulty == level]
+        if len(source_candidates) + len(fallback_candidates) < count:
+            raise QuizError("Not enough reviewed questions match this custom quiz.")
+        source_count = min(count, len(source_candidates))
+        chosen.extend(rng.sample(source_candidates, source_count))
+        chosen.extend(rng.sample(fallback_candidates, count - source_count))
+
+    return _render_quiz(
+        "Custom quiz · " + ", ".join(topics), None, mix, chosen, citations, rng
     )
 
 

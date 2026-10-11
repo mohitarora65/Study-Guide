@@ -12,6 +12,7 @@ from study_guide.database import (
     delete_thread,
     list_thread_messages,
     list_threads,
+    rename_thread,
 )
 
 
@@ -151,3 +152,16 @@ def test_thread_creation_and_turn_limits() -> None:
             is_refusal=False,
             citations=[],
         )
+
+
+def test_thread_rename_is_bounded_and_owner_scoped() -> None:
+    client = FakeClient()
+    thread = create_thread(client, "alice-key", "Original")
+
+    rename_thread(client, "bob-key", thread["id"], "Not allowed")
+    assert thread["title"] == "Original"
+
+    rename_thread(client, "alice-key", thread["id"], "  " + "x" * 100)
+    assert thread["title"] == "x" * 80
+    with pytest.raises(DatabaseError):
+        rename_thread(client, "alice-key", thread["id"], "   ")

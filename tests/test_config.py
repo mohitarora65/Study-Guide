@@ -1,4 +1,6 @@
 from copy import deepcopy
+from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -119,3 +121,11 @@ def test_supabase_requires_https() -> None:
 
     with pytest.raises(ConfigurationError, match="HTTPS"):
         load_settings(secrets)
+
+
+def test_streamlit_upload_limit_matches_pdf_validation() -> None:
+    config = tomllib.loads(
+        (Path(__file__).parents[1] / ".streamlit" / "config.toml").read_text()
+    )
+
+    assert config["server"]["maxUploadSize"] == 25

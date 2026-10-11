@@ -149,13 +149,16 @@ settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
 identity = SimpleNamespace(user_key="synthetic-owner")
 def save_turn(client, owner, thread_id, **values):
     st.session_state["saved_turn"] = (owner, thread_id, values)
+def create(_client, _owner, title):
+    st.session_state["created_title"] = title
+    return {"id": "thread-new"}
 with patch.object(app, "build_client", return_value=object()), \\
      patch.object(app, "list_threads", return_value=[]), \\
      patch.object(app, "answer_question", return_value=SimpleNamespace(
          text="A basis spans the space with independent vectors.",
          citations=({"chunk_id": "c1", "page_number": 25},),
      )), \\
-     patch.object(app, "create_thread", return_value={"id": "thread-new"}), \\
+     patch.object(app, "create_thread", side_effect=create), \\
      patch.object(app, "append_turn", side_effect=save_turn):
     app.render_study_page(settings, identity)
 '''
@@ -166,8 +169,40 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert not app.exception
     owner, thread_id, turn = app.session_state["saved_turn"]
     assert (owner, thread_id) == ("synthetic-owner", "thread-new")
+    assert app.session_state["created_title"] == "What is a basis?"
     assert turn["question"] == "What is a basis?"
     assert turn["citations"] == [{"chunk_id": "c1", "page_number": 25}]
+
+
+def test_study_uses_an_optional_chat_name() -> None:
+    script = '''
+import streamlit as st
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+identity = SimpleNamespace(user_key="synthetic-owner")
+def create(_client, _owner, title):
+    st.session_state["created_title"] = title
+    return {"id": "thread-new"}
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_threads", return_value=[]), \\
+     patch.object(app, "answer_question", return_value=SimpleNamespace(
+         text="Answer", citations=()
+     )), \\
+     patch.object(app, "create_thread", side_effect=create), \\
+     patch.object(app, "append_turn"):
+    app.render_study_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run()
+    assert app.title[0].value == "Let’s resolve your doubt"
+    assert app.chat_input[0].placeholder == "Ask a question from your course material…"
+    app.text_input[0].set_value("My revision chat").run()
+    app.chat_input[0].set_value("What is a basis?").run()
+
+    assert not app.exception
+    assert app.session_state["created_title"] == "My revision chat"
 
 
 def test_quiz_generates_seven_answers_and_saves_only_summary() -> None:
@@ -214,8 +249,8 @@ with patch.object(app, "build_client", return_value=object()), \\
 
     next(button for button in app.button if button.label == "Start 7-question quiz").click().run()
     assert not app.exception
-    assert len(app.radio) == 7
-    for radio in app.radio:
+    assert len(app.radio) == 8
+    for radio in app.radio[1:]:
         radio.set_value(0)
     next(button for button in app.button if button.label == "Submit all answers").click().run()
 
@@ -226,6 +261,50 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert saved["correct_count"] == 7
     assert "questions" not in saved
     assert any("Score: 7/7" in success.value for success in app.success)
+
+
+def test_custom_quiz_is_practice_only_and_summarizes_five_questions() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+from study_guide.quizzing import GeneratedQuiz, QuizQuestion
+
+settings = SimpleNamespace()
+identity = SimpleNamespace(user_key="synthetic-owner", email="student@iiti.ac.in")
+question = QuizQuestion(
+    prompt="Question", options=("A", "B", "C", "D"), correct_index=0,
+    difficulty="easy", explanation="Explanation",
+    citations=({"display_name": "notes.pdf", "page_number": 1},),
+)
+quiz = GeneratedQuiz(
+    topic="Custom quiz", mastery_before=None,
+    difficulty_mix={"easy": 5, "medium": 0, "hard": 0},
+    questions=(question,) * 5,
+)
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "topic-1", "name": "Rank and fundamental subspaces", "active": True}
+     ]), \\
+     patch.object(app, "list_approved_questions", return_value=[]), \\
+     patch.object(app, "generate_custom_bank_quiz", return_value=quiz), \\
+     patch.object(app, "complete_quiz_attempt", side_effect=AssertionError("must not persist")):
+    app.render_quiz_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run()
+    assert app.title[0].value == "Let’s test"
+    app.radio[0].set_value("Create Custom Quiz").run()
+    app.selectbox[0].set_value(5).run()
+    next(button for button in app.button if button.label == "Create custom quiz").click().run()
+    assert len(app.radio) == 6
+    for radio in app.radio[1:]:
+        radio.set_value(0)
+    next(button for button in app.button if button.label == "Submit all answers").click().run()
+
+    assert not app.exception
+    assert any("Score: 5/5" in success.value for success in app.success)
+    assert any("Correct: 5" in success.value for success in app.success)
+    assert "mastery_after" not in app.session_state.get("saved_quiz_summary", {})
 
 
 def test_failed_quiz_generation_shows_safe_error_without_saving_attempt() -> None:

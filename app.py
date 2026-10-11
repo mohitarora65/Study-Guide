@@ -36,6 +36,7 @@ from study_guide.database import (
     list_student_quiz_progress,
     list_thread_messages,
     list_threads,
+    rename_thread,
     update_quiz_topic,
     update_document_classification,
     update_question_candidate,
@@ -49,7 +50,11 @@ from study_guide.ingestion import (
     prepare_pdf,
 )
 from study_guide.question_extraction import candidate_rows, extract_question_candidates
-from study_guide.question_bank import generate_bank_quiz, has_bank_topic
+from study_guide.question_bank import (
+    generate_bank_quiz,
+    generate_custom_bank_quiz,
+    has_bank_topic,
+)
 from study_guide.quizzing import QuizError, grade_quiz
 from study_guide.study_modes import STUDY_MODE_LABELS, STUDY_SCOPES, active_study_scope
 
@@ -75,9 +80,9 @@ def render_sign_in() -> None:
 
 
 def _clear_quiz_session() -> None:
-    for key in ("active_quiz", "active_quiz_topic_id", "quiz_result"):
+    for key in ("active_quiz", "active_quiz_kind", "active_quiz_topic_id", "quiz_result"):
         st.session_state.pop(key, None)
-    for number in range(1, 8):
+    for number in range(1, 11):
         st.session_state.pop(f"quiz-answer-{number}", None)
 
 
@@ -100,7 +105,7 @@ def render_account_controls(identity: Identity) -> None:
 
 
 def render_study_page(settings: Settings, identity: Identity) -> None:
-    st.title("Study")
+    st.title("Let’s resolve your doubt")
     answering_enabled = bool(settings.gemini_api_key and settings.ai_star_api_key)
     if not answering_enabled:
         st.info("Question answering is not configured yet. Your saved chats remain private and available below.")
@@ -128,6 +133,27 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
         key=f"history_chat_selector_{active_id or 'new'}",
     )
     st.session_state["active_chat_id"] = selected_id
+    new_chat_title = ""
+    if selected_id is None:
+        new_chat_title = st.text_input(
+            "Chat name (optional)",
+            max_chars=80,
+            placeholder="Leave blank to use your first question",
+        )
+    else:
+        with st.expander("Rename chat"):
+            renamed_title = st.text_input(
+                "Chat name",
+                value=thread_by_id[selected_id]["title"],
+                max_chars=80,
+                key=f"rename-chat-title-{selected_id}",
+            )
+            if st.button("Save chat name", key=f"rename-chat-{selected_id}"):
+                try:
+                    rename_thread(client, identity.user_key, selected_id, renamed_title)
+                    st.rerun()
+                except DatabaseError as exc:
+                    st.error(str(exc))
     if selected_id is not None and st.button("Delete this chat…", key=f"delete-chat-{selected_id}"):
         st.session_state["confirm_chat_delete"] = selected_id
         st.rerun()
@@ -164,7 +190,7 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
                         )
 
     question = st.chat_input(
-        f"Ask about the course material (max {MAX_QUESTION_CHARS} characters)",
+        "Ask a question from your course material…",
         max_chars=MAX_QUESTION_CHARS,
         disabled=not answering_enabled,
     )
@@ -183,7 +209,9 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
                 thread_id = selected_id
                 created_thread = thread_id is None
                 if created_thread:
-                    thread_id = create_thread(client, identity.user_key, question)["id"]
+                    thread_id = create_thread(
+                        client, identity.user_key, new_chat_title or question
+                    )["id"]
                 try:
                     append_turn(
                         client,
@@ -211,7 +239,7 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
 
 
 def render_quiz_page(settings: Settings, identity: Identity) -> None:
-    st.title("Adaptive quiz")
+    st.title("Let’s test")
     client = build_client(settings)
     try:
         try:
@@ -232,39 +260,86 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         return
 
     topic_by_id = {topic["id"]: topic for topic in topics}
-    selected_topic_id = st.selectbox(
-        "Topic",
-        list(topic_by_id),
-        format_func=lambda topic_id: topic_by_id[topic_id]["name"],
-        disabled="active_quiz" in st.session_state,
+    active = "active_quiz" in st.session_state
+    quiz_type = st.radio(
+        "Quiz type",
+        ("Quick Quiz", "Create Custom Quiz"),
+        horizontal=True,
+        disabled=active,
     )
-    if st.button(
-        "Start 7-question quiz",
-        type="primary",
-        disabled="active_quiz" in st.session_state,
-    ):
-        try:
-            _clear_quiz_session()
-            mastery = get_topic_mastery(client, identity.user_key, selected_topic_id)
+    if quiz_type == "Quick Quiz":
+        selected_topic_id = st.selectbox(
+            "Topic",
+            list(topic_by_id),
+            format_func=lambda topic_id: topic_by_id[topic_id]["name"],
+            disabled=active,
+        )
+        if st.button("Start 7-question quiz", type="primary", disabled=active):
             try:
-                reviewed = list_approved_questions(
-                    client,
-                    selected_topic_id,
-                    active_study_scope(st.session_state.get("study_mode")),
-                )
-            except DatabaseError:
-                reviewed = []
-            with st.spinner("Preparing a reviewed quiz from the course material…"):
-                st.session_state.active_quiz = generate_bank_quiz(
-                    topic_by_id[selected_topic_id]["name"],
-                    mastery,
-                    source_questions=reviewed,
-                )
-            st.session_state.active_quiz_topic_id = selected_topic_id
-            st.session_state.pop("quiz_result", None)
-            st.rerun()
-        except (DatabaseError, QuizError) as exc:
-            st.error(str(exc))
+                _clear_quiz_session()
+                mastery = get_topic_mastery(client, identity.user_key, selected_topic_id)
+                try:
+                    reviewed = list_approved_questions(
+                        client,
+                        selected_topic_id,
+                        active_study_scope(st.session_state.get("study_mode")),
+                    )
+                except DatabaseError:
+                    reviewed = []
+                with st.spinner("Preparing a reviewed quiz from the course material…"):
+                    st.session_state.active_quiz = generate_bank_quiz(
+                        topic_by_id[selected_topic_id]["name"],
+                        mastery,
+                        source_questions=reviewed,
+                    )
+                st.session_state.active_quiz_kind = "quick"
+                st.session_state.active_quiz_topic_id = selected_topic_id
+                st.rerun()
+            except (DatabaseError, QuizError) as exc:
+                st.error(str(exc))
+    else:
+        selected_topic_ids = st.multiselect(
+            "Topics",
+            list(topic_by_id),
+            default=[next(iter(topic_by_id))],
+            format_func=lambda topic_id: topic_by_id[topic_id]["name"],
+            disabled=active,
+        )
+        question_count = st.selectbox(
+            "Number of questions", (5, 7, 10), index=1, disabled=active
+        )
+        difficulties = st.multiselect(
+            "Difficulty",
+            ("easy", "medium", "hard"),
+            default=("easy", "medium", "hard"),
+            format_func=str.title,
+            disabled=active,
+        )
+        st.caption("Custom quizzes are practice-only and do not change mastery.")
+        if st.button("Create custom quiz", type="primary", disabled=active):
+            try:
+                _clear_quiz_session()
+                topic_sources = {}
+                for topic_id in selected_topic_ids:
+                    try:
+                        reviewed = list_approved_questions(
+                            client,
+                            topic_id,
+                            active_study_scope(st.session_state.get("study_mode")),
+                        )
+                    except DatabaseError:
+                        reviewed = []
+                    topic_sources[topic_by_id[topic_id]["name"]] = reviewed
+                with st.spinner("Preparing a custom quiz from reviewed questions…"):
+                    st.session_state.active_quiz = generate_custom_bank_quiz(
+                        topic_sources,
+                        question_count,
+                        tuple(difficulties),
+                    )
+                st.session_state.active_quiz_kind = "custom"
+                st.rerun()
+            except (DatabaseError, QuizError) as exc:
+                st.error(str(exc))
 
     quiz = st.session_state.get("active_quiz")
     if quiz is None:
@@ -280,9 +355,20 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
     )
     result = st.session_state.get("quiz_result")
     if result:
-        st.success(
-            f"Score: {result['correct_count']}/7 ({result['score']}%) · "
-            f"Topic mastery: {result['mastery_after']}%"
+        total = len(quiz.questions)
+        summary = (
+            f"Score: {result['correct_count']}/{total} ({result['score']}%) · "
+            f"Correct: {result['correct_count']} · Incorrect: {total - result['correct_count']}"
+        )
+        if result.get("mastery_after") is not None:
+            summary += f" · Updated mastery: {result['mastery_after']}%"
+        st.success(summary)
+        st.write(
+            "Difficulty: " + " · ".join(
+                f"{level.title()} {values['correct']}/{values['total']}"
+                for level, values in result["difficulty_breakdown"].items()
+                if values["total"]
+            )
         )
         for number, (question, answer) in enumerate(
             zip(quiz.questions, result["answers"], strict=True), start=1
@@ -312,24 +398,44 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         submitted = st.form_submit_button("Submit all answers", type="primary")
     if submitted:
         if any(answer is None for answer in answers):
-            st.error("Answer all seven questions before submitting.")
+            st.error("Answer every question before submitting.")
             return
         try:
             selected_answers = [int(answer) for answer in answers]
             correct_count = grade_quiz(quiz, selected_answers)
-            saved = complete_quiz_attempt(
-                client,
-                attempt_id=str(uuid4()),
-                user_key=identity.user_key,
-                email=identity.email,
-                topic_id=st.session_state.active_quiz_topic_id,
-                correct_count=correct_count,
-                difficulty_mix=quiz.difficulty_mix,
-            )
+            difficulty_breakdown = {
+                level: {
+                    "correct": sum(
+                        answer == question.correct_index
+                        for question, answer in zip(
+                            quiz.questions, selected_answers, strict=True
+                        )
+                        if question.difficulty == level
+                    ),
+                    "total": sum(question.difficulty == level for question in quiz.questions),
+                }
+                for level in ("easy", "medium", "hard")
+            }
+            if st.session_state.get("active_quiz_kind") == "custom":
+                saved = {
+                    "score": round(correct_count * 100 / len(quiz.questions), 2),
+                    "mastery_after": None,
+                }
+            else:
+                saved = complete_quiz_attempt(
+                    client,
+                    attempt_id=str(uuid4()),
+                    user_key=identity.user_key,
+                    email=identity.email,
+                    topic_id=st.session_state.active_quiz_topic_id,
+                    correct_count=correct_count,
+                    difficulty_mix=quiz.difficulty_mix,
+                )
             st.session_state.quiz_result = {
                 **saved,
                 "correct_count": correct_count,
                 "answers": selected_answers,
+                "difficulty_breakdown": difficulty_breakdown,
             }
             st.rerun()
         except (DatabaseError, QuizError) as exc:

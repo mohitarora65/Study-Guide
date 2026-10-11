@@ -109,10 +109,10 @@ def updated_mastery(previous: int | None, correct_count: int) -> int:
 
 
 def grade_quiz(quiz: GeneratedQuiz, answers: list[int]) -> int:
-    if len(answers) != QUESTION_COUNT or any(
+    if not quiz.questions or len(answers) != len(quiz.questions) or any(
         type(answer) is not int or not 0 <= answer < 4 for answer in answers
     ):
-        raise QuizError("Answer all seven questions before submitting.")
+        raise QuizError("Answer every question before submitting.")
     return sum(
         answer == question.correct_index
         for answer, question in zip(answers, quiz.questions, strict=True)

@@ -6,9 +6,21 @@
 **Mode:** Learning / Production with a tightly scoped Version 1  
 **Last updated:** 2026-10-11
 
+## Final UI and Project Close-out — 2026-10-11
+
+**Status:** LOCAL PASS / USER_REVIEW_PENDING; deployment not performed. The user approved `PHASE_PLAN_FINAL_UI.md` after reviewing each affected section.
+
+- Study now uses “Let’s resolve your doubt” and “Ask a question from your course material…”. New chats accept an optional 80-character name and otherwise use the first question; saved chats can be renamed through an owner-scoped database update.
+- Quiz now uses “Let’s test”. The existing seven-question Quick Quiz still persists its summary and mastery. Create Custom Quiz selects one or more reviewed topics, 5/7/10 questions and one or more difficulties, displays all questions together, and keeps its result session-only without calling the attempt/mastery write.
+- Both quiz modes now show score, correct/incorrect totals, per-difficulty results, explanations and citations; Quick Quiz also shows updated mastery.
+- Streamlit's displayed upload limit is now 25 MB, matching the existing 25 MiB application/storage boundary.
+- Verification: 132 tests passed in 2.47 seconds; compilation, `pip check` and `git diff --check` passed. A temporary Streamlit server returned `ok` on port 8514 and was stopped. The Playwright CLI could not launch because Google Chrome is absent; the connected Brave browser rendered the local signed-out page instead. Authenticated UI behavior is covered by synthetic AppTests, not a fresh real-account browser run.
+- Difficulties: user-reported none. Agent-observed: the new Quiz Type radio changed an older UI control count; the assertion was corrected to count answer radios only. The local port 8514 did not match the configured OAuth callback origin, so no login was attempted. No provider request, production/database write, installation, Git mutation or deployment occurred.
+- Next: user reviews and performs the Git commit/push; that push may deploy the final UI. Then run a bounded authenticated smoke test for chat naming/renaming, Quick Quiz, Custom Quiz and the 25 MB uploader label.
+
 ## Version 3 Discovery — Structured Study Modes and Question Extraction
 
-**Status:** LOCAL IMPLEMENTATION PASS; PRODUCTION MIGRATION PASS; DEPLOYMENT PENDING — `DELEGATED_DECISION`, 2026-10-11. The user requested separate Theory/Questions uploads, question extraction that prioritizes question material while also using explicit question sections in theory, and Mid Sem, End Sem, Quiz and Overall study modes. `PHASE_PLAN_V3.md` records the bounded design. Git remains user-controlled, and deployment still requires the user's Git checkpoint.
+**Status:** DEPLOYED; PRODUCTION MIGRATION PASS — `DELEGATED_DECISION`, 2026-10-11. The user requested separate Theory/Questions uploads, question extraction that prioritizes question material while also using explicit question sections in theory, and Mid Sem, End Sem, Quiz and Overall study modes. `PHASE_PLAN_V3.md` records the bounded design. Commit `2f8c4be` contains the V3 application and is included in deployed `main` commit `6608c79`.
 
 **V3 decision 1 — USER_APPROVED, 2026-10-11:** the user replied “approve” to the mandatory review recommendation. Every extracted question must remain non-student-visible until an admin explicitly approves it. This is a product decision only; no implementation or external change occurred.
 

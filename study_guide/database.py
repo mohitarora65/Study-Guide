@@ -484,6 +484,19 @@ def create_thread(client: Any, user_key: str, title: str) -> dict[str, Any]:
         raise DatabaseError("Chat could not be created") from exc
 
 
+def rename_thread(client: Any, user_key: str, thread_id: str, title: str) -> None:
+    title = title.strip()[:80]
+    if not user_key or not thread_id or not title:
+        raise DatabaseError("Chat could not be renamed")
+    try:
+        client.table("threads").update({
+            "title": title,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", thread_id).eq("user_key", user_key).execute()
+    except Exception as exc:
+        raise DatabaseError("Chat could not be renamed") from exc
+
+
 def append_turn(
     client: Any,
     user_key: str,
