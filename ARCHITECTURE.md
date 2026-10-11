@@ -5,6 +5,15 @@
 
 **Approved clarification, 2026-10-09:** V1.2 uses Google `gemini-embedding-2` at 768 dimensions. DeepSeek V4 Flash is a proposed V1.3 answer model only; no third-party generation integration is approved yet.
 
+## V3 Addendum — Study Modes and Reviewed Question Sources (local, 2026-10-11)
+
+- `documents` owns `material_type` and one or more stored coverage tags. “Overall” is computed by omitting the scope filter.
+- `match_chunks_by_scope` preserves the active-ready retrieval boundary and adds a document coverage predicate; the original RPC remains available for Overall and rollback compatibility.
+- Deterministic parsing creates private `question_candidates` with document/version/page provenance. It makes no model call and never marks a candidate approved.
+- The database rejects incomplete approved rows; the admin UI additionally requires four distinct non-empty options, a correct option, explanation, difficulty, topic and coverage.
+- Adaptive Quiz loads only approved candidates matching topic and mode, prioritizes them by difficulty, and fills missing slots from the existing reviewed bank. Attempts still store summaries only.
+- Browser roles remain revoked. Streamlit's server-side service client is the only reader/writer for classification and review data.
+
 ## 1. Architecture Goal
 
 Build one small server-rendered Streamlit application that authenticates IIT Indore students, manages one approved PDF collection, retrieves page-aware evidence, and returns validated cited answers. Keep authorization, document state and citation provenance explicit; avoid agents, web tools and framework orchestration.

@@ -23,14 +23,22 @@ from study_guide.database import (
     delete_quiz_profile,
     delete_thread,
     get_topic_mastery,
+    get_document,
+    download_pdf,
+    insert_question_candidates,
+    list_approved_questions,
+    list_approved_question_topic_ids,
     list_admin_quiz_progress,
     list_documents,
+    list_question_candidates,
     list_quiz_topics,
     list_student_quiz_attempts,
     list_student_quiz_progress,
     list_thread_messages,
     list_threads,
     update_quiz_topic,
+    update_document_classification,
+    update_question_candidate,
 )
 from study_guide.ingestion import (
     IngestionError,
@@ -38,9 +46,12 @@ from study_guide.ingestion import (
     ingest_pdf,
     reindex_document,
     retry_failed_document,
+    prepare_pdf,
 )
+from study_guide.question_extraction import candidate_rows, extract_question_candidates
 from study_guide.question_bank import generate_bank_quiz, has_bank_topic
 from study_guide.quizzing import QuizError, grade_quiz
+from study_guide.study_modes import STUDY_MODE_LABELS, STUDY_SCOPES, active_study_scope
 
 
 def render_configuration_error() -> None:
@@ -78,6 +89,13 @@ def _log_out() -> None:
 def render_account_controls(identity: Identity) -> None:
     role = "Admin" if identity.is_admin else "Student"
     st.sidebar.write(f"Signed in as {role}")
+    st.sidebar.selectbox(
+        "Study mode",
+        list(STUDY_MODE_LABELS),
+        index=list(STUDY_MODE_LABELS).index("overall"),
+        format_func=STUDY_MODE_LABELS.get,
+        key="study_mode",
+    )
     st.sidebar.button("Log out", on_click=_log_out)
 
 
@@ -160,6 +178,7 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
                     database_client=client,
                     user_key=identity.user_key,
                     history=messages,
+                    study_scope=active_study_scope(st.session_state.get("study_mode")),
                 )
                 thread_id = selected_id
                 created_thread = thread_id is None
@@ -195,9 +214,15 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
     st.title("Adaptive quiz")
     client = build_client(settings)
     try:
+        try:
+            extracted_topic_ids = list_approved_question_topic_ids(
+                client, active_study_scope(st.session_state.get("study_mode"))
+            )
+        except DatabaseError:
+            extracted_topic_ids = set()
         topics = [
             topic for topic in list_quiz_topics(client)
-            if has_bank_topic(topic.get("name"))
+            if has_bank_topic(topic.get("name")) or topic.get("id") in extracted_topic_ids
         ]
     except DatabaseError as exc:
         st.error(str(exc))
@@ -221,10 +246,19 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         try:
             _clear_quiz_session()
             mastery = get_topic_mastery(client, identity.user_key, selected_topic_id)
+            try:
+                reviewed = list_approved_questions(
+                    client,
+                    selected_topic_id,
+                    active_study_scope(st.session_state.get("study_mode")),
+                )
+            except DatabaseError:
+                reviewed = []
             with st.spinner("Preparing a reviewed quiz from the course material…"):
                 st.session_state.active_quiz = generate_bank_quiz(
                     topic_by_id[selected_topic_id]["name"],
                     mastery,
+                    source_questions=reviewed,
                 )
             st.session_state.active_quiz_topic_id = selected_topic_id
             st.session_state.pop("quiz_result", None)
@@ -446,10 +480,22 @@ def render_documents_page(settings: Settings) -> None:
         accept_multiple_files=False,
         help="Text-based, unencrypted PDFs only. Scanned pages are not OCRed.",
     )
+    material_type = st.radio(
+        "Material type",
+        ("theory", "questions"),
+        format_func=lambda value: value.title(),
+        horizontal=True,
+    )
+    study_scopes = st.multiselect(
+        "Coverage",
+        list(STUDY_SCOPES),
+        default=list(STUDY_SCOPES),
+        format_func=lambda value: STUDY_MODE_LABELS[value],
+    )
     if st.button(
         "Upload and index",
         type="primary",
-        disabled=uploaded is None or settings.gemini_api_key is None,
+        disabled=uploaded is None or settings.gemini_api_key is None or not study_scopes,
     ):
         try:
             with st.status("Indexing PDF", expanded=True) as status:
@@ -459,6 +505,8 @@ def render_documents_page(settings: Settings) -> None:
                     uploaded.name,
                     uploaded.type,
                     uploaded.getvalue(),
+                    material_type=material_type,
+                    study_scopes=tuple(study_scopes),
                     progress=status.write,
                 )
                 status.update(label="Indexing complete", state="complete")
@@ -498,6 +546,36 @@ def render_documents_page(settings: Settings) -> None:
         with st.container(border=True):
             st.markdown(f"**{document['display_name']}**")
             st.write(f"Status: {document['status']}")
+            st.caption(
+                f"{document.get('material_type', 'theory').title()} · "
+                + ", ".join(STUDY_MODE_LABELS[scope] for scope in document.get("study_scopes") or STUDY_SCOPES)
+            )
+            with st.expander("Classification"):
+                current_type = document.get("material_type", "theory")
+                current_scopes = document.get("study_scopes") or list(STUDY_SCOPES)
+                with st.form(f"classification-{document['id']}"):
+                    edited_type = st.radio(
+                        "Material type",
+                        ("theory", "questions"),
+                        index=("theory", "questions").index(current_type),
+                        format_func=lambda value: value.title(),
+                        horizontal=True,
+                    )
+                    edited_scopes = st.multiselect(
+                        "Coverage",
+                        list(STUDY_SCOPES),
+                        default=current_scopes,
+                        format_func=lambda value: STUDY_MODE_LABELS[value],
+                    )
+                    save_classification = st.form_submit_button("Save classification")
+                if save_classification:
+                    try:
+                        update_document_classification(
+                            client, document["id"], edited_type, tuple(edited_scopes)
+                        )
+                        st.rerun()
+                    except DatabaseError as exc:
+                        st.error(str(exc))
             version = document.get("active_version")
             if version:
                 st.write(
@@ -564,6 +642,32 @@ def render_documents_page(settings: Settings) -> None:
                         st.rerun()
                     except (IngestionError, DatabaseError) as exc:
                         st.error(str(exc))
+                if st.button("Extract question drafts", key=f"extract-{document['id']}"):
+                    try:
+                        source = get_document(client, document["id"])
+                        prepared = prepare_pdf(
+                            source["display_name"],
+                            "application/pdf",
+                            download_pdf(client, source["object_path"]),
+                        )
+                        extracted = extract_question_candidates(
+                            prepared.pages, source.get("material_type", "theory")
+                        )
+                        rows = candidate_rows(
+                            extracted,
+                            document_id=source["id"],
+                            version_id=source["active_version_id"],
+                            material_type=source.get("material_type", "theory"),
+                            study_scopes=tuple(source.get("study_scopes") or STUDY_SCOPES),
+                        )
+                        saved = insert_question_candidates(client, rows)
+                        st.session_state.document_flash = (
+                            "success",
+                            f"Saved {saved} new question draft(s) for review.",
+                        )
+                        st.rerun()
+                    except (IngestionError, DatabaseError, ValueError) as exc:
+                        st.error(str(exc))
 
             if second.button("Delete…", key=f"delete-{document['id']}"):
                 st.session_state.confirm_delete = document["id"]
@@ -590,6 +694,82 @@ def render_documents_page(settings: Settings) -> None:
                 if cancel.button("Cancel", key=f"cancel-{document['id']}"):
                     st.session_state.pop("confirm_delete", None)
                     st.rerun()
+
+
+def render_question_review_page(settings: Settings) -> None:
+    st.title("Question review")
+    st.write("Complete and approve extracted MCQs before students can use them.")
+    client = build_client(settings)
+    try:
+        candidates = list_question_candidates(client)
+        topics = list_quiz_topics(client)
+    except DatabaseError as exc:
+        st.error(str(exc))
+        return
+    if not candidates:
+        st.info("No question drafts are waiting for review.")
+        return
+    topic_by_id = {topic["id"]: topic for topic in topics}
+    for candidate in candidates:
+        with st.expander(
+            f"{candidate['display_name']} · PDF page {candidate['page_number']}",
+            expanded=False,
+        ):
+            with st.form(f"review-{candidate['id']}"):
+                prompt = st.text_area("Question", candidate["prompt"], max_chars=1000)
+                existing = candidate.get("options") or ["", "", "", ""]
+                options = [
+                    st.text_input(f"Option {letter}", existing[index])
+                    for index, letter in enumerate("ABCD")
+                ]
+                correct_index = st.selectbox(
+                    "Correct option", range(4),
+                    index=candidate.get("correct_index") or 0,
+                    format_func=lambda index: "ABCD"[index],
+                )
+                explanation = st.text_area("Explanation", candidate.get("explanation") or "")
+                difficulty = st.selectbox(
+                    "Difficulty", ("easy", "medium", "hard"),
+                    index=("easy", "medium", "hard").index(candidate.get("difficulty") or "easy"),
+                )
+                topic_id = st.selectbox(
+                    "Topic", list(topic_by_id),
+                    index=(list(topic_by_id).index(candidate["topic_id"]) if candidate.get("topic_id") in topic_by_id else 0),
+                    format_func=lambda value: topic_by_id[value]["name"],
+                ) if topic_by_id else None
+                scopes = st.multiselect(
+                    "Coverage", list(STUDY_SCOPES),
+                    default=candidate.get("study_scopes") or list(STUDY_SCOPES),
+                    format_func=lambda value: STUDY_MODE_LABELS[value],
+                )
+                save = st.form_submit_button("Save draft")
+                approve = st.form_submit_button("Approve", type="primary")
+                reject = st.form_submit_button("Reject")
+            if save or approve or reject:
+                if approve and (
+                    not prompt.strip() or len({option.strip() for option in options if option.strip()}) != 4
+                    or not explanation.strip() or not topic_id or not scopes
+                ):
+                    st.error("Approval requires a question, four distinct options, answer, explanation, topic and coverage.")
+                    continue
+                try:
+                    update_question_candidate(
+                        client,
+                        candidate["id"],
+                        {
+                            "prompt": prompt.strip(),
+                            "options": [option.strip() for option in options],
+                            "correct_index": correct_index,
+                            "explanation": explanation.strip() or None,
+                            "difficulty": difficulty,
+                            "topic_id": topic_id,
+                            "study_scopes": scopes,
+                            "status": "approved" if approve else "rejected" if reject else "draft",
+                        },
+                    )
+                    st.rerun()
+                except DatabaseError as exc:
+                    st.error(str(exc))
 
 
 def render_authenticated_app(settings: Settings, identity: Identity) -> None:
@@ -620,6 +800,11 @@ def render_authenticated_app(settings: Settings, identity: Identity) -> None:
                 lambda: render_documents_page(settings),
                 title="Documents",
                 url_path="documents",
+            ),
+            st.Page(
+                lambda: render_question_review_page(settings),
+                title="Question review",
+                url_path="question-review",
             ),
             st.Page(
                 lambda: render_quiz_topics_page(settings),

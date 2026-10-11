@@ -1,10 +1,14 @@
 # Grounded Mathematics Study Guide
 
-A Streamlit study assistant for IIT Indore's Mathematics for AI/ML course. It answers only from teaching-assistant-managed PDFs and now includes a locally implemented adaptive-quiz workflow.
+A deployed Streamlit study assistant for IIT Indore's Mathematics for AI/ML course. It answers only from teaching-assistant-managed PDFs and includes a source-reviewed adaptive-quiz workflow.
+
+[Live application](https://iiti-mathematics-study-guide.streamlit.app/)
 
 ## Current State
 
-V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. Quiz creation now samples a bundled, source-checked bank instead of waiting for live model generation. The deployment plan is approved, but no change to production `main` or the deployed app has occurred.
+V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat history and local hardening. V2 adds admin-managed quiz topics, seven-question MCQs, deterministic grading, rolling topic mastery, student summaries and admin progress lookup/deletion. Quiz creation samples a bundled, source-checked bank instead of waiting for live model generation. V2 is deployed from `main`; the user confirmed the corrected authenticated quiz topic UI in production on 2026-10-11.
+
+V3 is implemented locally and its additive schema migration is applied in production, but the application changes are not deployed. It classifies uploads as Theory or Questions, assigns Mid Sem / End Sem / Class Quiz coverage, scopes Study retrieval, extracts deterministic question drafts with page provenance, requires admin review, and prefers approved uploaded questions while retaining the bundled bank as fallback.
 
 The bundled bank contains 11 questions for each approved topic—four easy, four medium and three hard—so every mastery mix can be assembled locally. Question and option order are randomized. Unsupported topics fail safely until source-checked questions are added. See `PHASE_PLAN_QUESTION_BANK.md`.
 
@@ -47,7 +51,7 @@ Without a local secrets file, the app intentionally shows a safe configuration m
 
 ## Deployment
 
-The target is Streamlit Community Cloud with Python 3.12, the existing dedicated GitHub repository and `app.py` as the entrypoint. The existing V1 app is live; V2 deployment is pending the proposed deployment plan, production migration approval and user-controlled push. Do not publish `.serena/`, `.streamlit/secrets.toml` or `pdfs/`. See [OPERATIONS.md](OPERATIONS.md) for the secure secrets checklist, Google OAuth callback, smoke checks, incident response and rollback.
+The app is deployed on Streamlit Community Cloud from the dedicated GitHub repository's `main` branch with `app.py` as the entrypoint. Production quiz topics were aligned with the reviewed bank while preserving legacy history. Do not publish `.serena/`, `.streamlit/secrets.toml` or `pdfs/`. See [OPERATIONS.md](OPERATIONS.md) for the secure secrets checklist, Google OAuth callback, smoke checks, incident response and rollback.
 
 ## Database Migration
 
@@ -56,6 +60,7 @@ Apply the migrations in filename order only after confirming the target is a dev
 1. `supabase/migrations/001_initial.sql` creates the document, ingestion and chat tables.
 2. `supabase/migrations/002_ingestion.sql` adds ingestion metrics, the private `course-pdfs` bucket, atomic activation/deletion functions and active-version vector search.
 3. `supabase/migrations/003_adaptive_quiz.sql` adds private quiz topics, profiles, mastery and summary attempts plus atomic completion/profile-deletion functions.
+4. `supabase/migrations/004_study_modes_and_questions.sql` adds document classification, private question drafts and coverage-scoped retrieval. It is prepared locally and must not be applied to production without explicit approval and a backup/rollback check.
 
 All migrations preserve the server-only boundary: browser roles cannot access protected tables/functions, and the source-PDF bucket is private.
 
@@ -72,12 +77,14 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 ## PDF Ingestion
 
 - Admins upload one `.pdf` at a time, up to 25 MiB.
+- Each upload is classified as Theory or Questions and tagged for one or more of Mid Sem, End Sem and Class Quiz. Overall is their union.
 - PDFs must be readable, unencrypted and text-based. OCR is not included.
 - SHA-256 duplicate detection prevents the same bytes from creating another document.
 - Text stays within its real 1-based PDF page and is split into chunks of up to 1,800 characters with up to 250 characters of overlap.
 - Embeddings use `gemini-embedding-2` at 768 dimensions through the official Google SDK; LangChain is intentionally not used.
 - A replacement version becomes searchable only after every chunk is stored. Failed replacement attempts leave the earlier ready version active.
 - Delete first removes the document from retrieval, then removes the private object and derived database rows.
+- Admins explicitly extract question drafts. Question uploads are scanned broadly; Theory uploads are scanned only on pages with an explicit Questions/Exercises/Problems heading. Drafts are never student-visible until completed and approved.
 
 ## Tests
 
@@ -127,7 +134,8 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 - Larger course books have not been tested. The 25 MiB cap is provisional, and Supabase recommends resumable uploads above 6 MB.
 - Synthetic AI STAR checks used no student identity or saved chat; the grounded-answer check sent bounded retrieved course excerpts. AI STAR retention terms are unknown and transmission is explicitly accepted by the user.
 - V1.4 live evaluation and TA scoring are complete. A09 is a user-accepted known false refusal. Brave checks confirmed the sign-in flow and authenticated Admin/Study navigation; duplicate Streamlit page paths found during testing were fixed. In light theme, application body text and the sign-in button meet WCAG AA contrast; keyboard focus and 390-pixel width were checked on the signed-out page. Dark theme and a separate student-account browser session remain untested. A three-request synthetic concurrent burst completed with 6.28–7.10 second per-request latency and citations; it is not a capacity guarantee. An OSV scan covered 74 installed Python distributions, found local pip 26.1.2 affected by [GHSA-qwm4-qh6w-59xr](https://github.com/advisories/GHSA-qwm4-qh6w-59xr), and the local installer was updated to fixed version 26.2.0. The repeat scan found no advisories. No scanner package was installed.
-- V2.1 has not been deployed; the existing V1 deployment was not changed in this phase.
+- V2 is deployed. The user confirmed the corrected authenticated topic UI; a complete production quiz submission and student/admin progress synchronization were not explicitly recorded.
 - Streamlit Community Cloud and Supabase free hosting do not guarantee capacity or uptime for simultaneous class-wide use.
-- Historical live-generation trials were unreliable, so the student path now uses the bundled bank. Automated checks and local source checking cover all 33 questions; teaching-assistant content sign-off, authenticated browser flow and quiz keyboard/focus behavior remain pending. V2 is not release-ready. See `PHASE_PLAN_QUESTION_BANK.md` and `OPERATIONS.md`.
+- Historical live-generation trials were unreliable, so the student path now uses the bundled bank. Automated checks and source review cover all 33 questions. Quiz keyboard/focus behavior and a fully recorded production submission/progress-sync flow remain pending. See `PHASE_PLAN_QUESTION_BANK.md` and `OPERATIONS.md`.
+- V3 deterministic extraction recognizes numbered questions, A–D option lines and simple answer-key lines. It does not infer answers, OCR scans, or reliably reconstruct complex multi-column layouts; admins must complete and review every extracted MCQ. The production schema is migrated; application deployment, deliberate document reclassification and authenticated browser QA are pending.
 # Study-Guide

@@ -4,6 +4,7 @@ from pathlib import Path
 SCHEMA = Path("supabase/migrations/001_initial.sql").read_text()
 INGESTION_SCHEMA = Path("supabase/migrations/002_ingestion.sql").read_text()
 QUIZ_SCHEMA = Path("supabase/migrations/003_adaptive_quiz.sql").read_text()
+V3_SCHEMA = Path("supabase/migrations/004_study_modes_and_questions.sql").read_text()
 
 
 def test_schema_contains_required_tables_and_vector_column() -> None:
@@ -82,3 +83,14 @@ def test_quiz_schema_is_private_and_stores_summaries_only() -> None:
     assert "function public.complete_quiz_attempt" in QUIZ_SCHEMA
     assert "function public.delete_quiz_profile" in QUIZ_SCHEMA
     assert "select tm.mastery_score, tm.attempt_count" in QUIZ_SCHEMA
+
+
+def test_v3_schema_keeps_drafts_private_and_scopes_retrieval() -> None:
+    assert "add column material_type" in V3_SCHEMA
+    assert "add column study_scopes" in V3_SCHEMA
+    assert "create table public.question_candidates" in V3_SCHEMA
+    assert "status <> 'approved'" in V3_SCHEMA
+    assert "alter table public.question_candidates enable row level security" in V3_SCHEMA
+    assert "revoke all on table public.question_candidates from public, anon, authenticated" in V3_SCHEMA
+    assert "function public.match_chunks_by_scope" in V3_SCHEMA
+    assert "study_scope = any(d.study_scopes)" in V3_SCHEMA

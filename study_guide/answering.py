@@ -93,13 +93,16 @@ def embed_question(
         raise AnsweringError("Question search is temporarily unavailable.") from exc
 
 
-def retrieve_evidence(client: Any, embedding: list[float]) -> list[dict[str, Any]]:
+def retrieve_evidence(
+    client: Any, embedding: list[float], study_scope: str | None = None
+) -> list[dict[str, Any]]:
     try:
         return database.search_active_chunks(
             client,
             embedding,
             match_count=RETRIEVAL_COUNT,
             min_similarity=MIN_SIMILARITY,
+            study_scope=study_scope,
         )
     except DatabaseError as exc:
         raise AnsweringError("Course material search is temporarily unavailable.") from exc
@@ -169,6 +172,7 @@ def answer_question(
     user_key: str,
     history: list[dict[str, Any]] | None = None,
     opener: Any = None,
+    study_scope: str | None = None,
 ) -> ValidatedAnswer:
     question = validate_question(question)
     if not gemini_api_key or not ai_star_api_key:
@@ -177,7 +181,9 @@ def answer_question(
         raise AnsweringError("Question answering is unavailable.")
     _check_rate_limit(user_key)
 
-    evidence = retrieve_evidence(database_client, embed_question(question, gemini_api_key))
+    evidence = retrieve_evidence(
+        database_client, embed_question(question, gemini_api_key), study_scope
+    )
     if not evidence:
         return ValidatedAnswer(INSUFFICIENT_MATERIAL, ())
 

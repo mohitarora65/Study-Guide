@@ -14,6 +14,7 @@ from google.genai import types
 from pypdf import PdfReader
 
 from study_guide import database
+from study_guide.study_modes import validate_material_type, validate_study_scopes
 
 
 MAX_PDF_BYTES = 25 * 1024 * 1024
@@ -305,8 +306,15 @@ def ingest_pdf(
     mime_type: str | None,
     data: bytes,
     *,
+    material_type: str = "theory",
+    study_scopes: tuple[str, ...] = ("mid_sem", "end_sem", "quiz"),
     progress: Callable[[str], None] = lambda _message: None,
 ) -> IngestionOutcome:
+    try:
+        material_type = validate_material_type(material_type)
+        study_scopes = validate_study_scopes(study_scopes)
+    except ValueError as exc:
+        raise IngestionError("INVALID_CLASSIFICATION", str(exc)) from exc
     progress("Validating and extracting PDF text")
     prepared = prepare_pdf(filename, mime_type, data)
     existing = database.find_document_by_hash(client, prepared.content_hash)
@@ -335,6 +343,8 @@ def ingest_pdf(
                 "content_hash": prepared.content_hash,
                 "file_size_bytes": prepared.file_size_bytes,
                 "status": "processing",
+                "material_type": material_type,
+                "study_scopes": list(study_scopes),
             },
             version={
                 "id": version_id,

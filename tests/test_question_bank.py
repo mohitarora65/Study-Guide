@@ -54,3 +54,23 @@ def test_option_shuffle_keeps_the_correct_answer() -> None:
     quiz = generate_bank_quiz("Singular value decomposition", 85, rng=random.Random(3))
 
     assert all(question.options[question.correct_index] == expected[question.prompt] for question in quiz.questions)
+
+
+def test_approved_source_question_is_preferred_and_cited() -> None:
+    row = {
+        "prompt": "Uploaded easy question",
+        "options": ["A", "B", "C", "D"],
+        "correct_index": 0,
+        "difficulty": "easy",
+        "explanation": "Uploaded explanation",
+        "page_number": 9,
+        "display_name": "questions.pdf",
+    }
+
+    quiz = generate_bank_quiz(
+        "Rank and fundamental subspaces", None,
+        source_questions=[row], rng=random.Random(7),
+    )
+
+    uploaded = next(question for question in quiz.questions if question.prompt == row["prompt"])
+    assert uploaded.citations == ({"display_name": "questions.pdf", "page_number": 9},)

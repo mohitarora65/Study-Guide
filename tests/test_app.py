@@ -66,6 +66,7 @@ def test_authenticated_navigation_assigns_unique_page_paths(monkeypatch) -> None
         "quiz",
         "progress",
         "documents",
+        "question-review",
         "quiz-topics",
         "student-progress",
     ]
@@ -90,6 +91,19 @@ def test_student_navigation_does_not_include_admin_pages(monkeypatch) -> None:
     )
 
     assert [page["url_path"] for page in pages] == ["study", "quiz", "progress"]
+
+
+def test_account_controls_default_to_overall_study_mode() -> None:
+    script = '''
+from types import SimpleNamespace
+import app
+app.render_account_controls(SimpleNamespace(is_admin=False))
+'''
+    app = AppTest.from_string(script).run()
+
+    assert not app.exception
+    assert app.selectbox[0].value == "overall"
+    assert app.selectbox[0].options == ["Mid Sem", "End Sem", "Class Quiz", "Overall"]
 
 
 def test_study_history_remains_available_when_answer_provider_is_unconfigured() -> None:
@@ -259,6 +273,26 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert not app.exception
     assert app.info[0].value == "No reviewed quiz topics are available yet."
     assert not any(button.label == "Start 7-question quiz" for button in app.button)
+
+
+def test_quiz_page_shows_topic_with_approved_extracted_questions() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_approved_question_topic_ids", return_value={"topic-1"}), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "topic-1", "name": "Uploaded topic", "active": True}
+     ]):
+    app.render_quiz_page(SimpleNamespace(), SimpleNamespace(user_key="owner"))
+'''
+    app = AppTest.from_string(script).run()
+
+    assert not app.exception
+    assert app.selectbox[0].value == "topic-1"
+    assert any(button.label == "Start 7-question quiz" for button in app.button)
 
 
 def test_student_progress_shows_mastery_and_attempt_summaries() -> None:

@@ -2,13 +2,13 @@
 
 **Status:** Version 1 APPROVED; Version 2 APPROVED — user said “reduce tokens rest is fine” on 2026-10-10
 **Date:** 2026-10-10
-**Versions:** Version 1 deployed study guide; Version 2 adaptive quiz
+**Versions:** Version 1 deployed study guide; Version 2 adaptive quiz; Version 3 structured study modes and reviewed question sources
 
 ## 1. Delivery Strategy
 
 Build the smallest secure vertical slices in dependency order. Each phase needs one whole-phase approval, then runs end-to-end through implementation, tests, fixes and documentation before review. Git staging, commits and pushes remain user-controlled.
 
-Version 1 delivered the grounded study guide. Version 2 is the separately planned adaptive-quiz feature approved through V2-G1–G4. No third product version is planned.
+Version 1 delivered the grounded study guide. Version 2 delivered the adaptive quiz. Version 3 is locally implemented under the user's approved question-source scope and bounded autopilot; its additive production migration passed, while the user-controlled deployment and authenticated workflow review remain.
 
 ## 2. Dependency Order
 
@@ -26,6 +26,10 @@ V1.5 Controlled deployment and final audit
 V2.1 Adaptive quiz implementation
         ↓
 V2.2 Quiz evaluation, rollout and audit
+        ↓
+V3.1–V3.4 Classification, extraction, review and study modes
+        ↓
+V3.5 Controlled migration and rollout
         ↓
 Post-completion interview artifacts
 ```

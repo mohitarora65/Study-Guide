@@ -200,6 +200,41 @@ def test_completed_ingestion_activates_only_after_chunks_are_stored(
     assert events == ["upload", "records", "chunks", "activate"]
 
 
+def test_ingestion_persists_material_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(ingestion, "prepare_pdf", lambda *_args: _prepared())
+    monkeypatch.setattr(database, "find_document_by_hash", lambda *_args: None)
+    monkeypatch.setattr(database, "upload_pdf", lambda *_args: None)
+    monkeypatch.setattr(
+        database,
+        "create_document_records",
+        lambda *_args, **kwargs: saved.update(kwargs["document"]),
+    )
+    monkeypatch.setattr(
+        ingestion,
+        "_finish_ingestion",
+        lambda *_args: ingestion.IngestionOutcome("id", "notes.pdf", 1),
+    )
+
+    ingest_pdf(
+        object(), "key", "notes.pdf", "application/pdf", b"data",
+        material_type="questions", study_scopes=("mid_sem", "quiz"),
+    )
+
+    assert saved["material_type"] == "questions"
+    assert saved["study_scopes"] == ["mid_sem", "quiz"]
+
+
+def test_ingestion_rejects_empty_coverage_before_processing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ingestion, "prepare_pdf", lambda *_args: pytest.fail("must validate first"))
+    with pytest.raises(IngestionError) as error:
+        ingest_pdf(
+            object(), "key", "notes.pdf", "application/pdf", b"data",
+            study_scopes=(),
+        )
+    assert error.value.code == "INVALID_CLASSIFICATION"
+
+
 def test_failed_ingestion_records_safe_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     failures: list[str] = []
     monkeypatch.setattr(ingestion, "prepare_pdf", lambda *_args: _prepared())

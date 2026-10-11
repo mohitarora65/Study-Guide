@@ -9,6 +9,7 @@ from uuid import UUID
 from supabase import Client, create_client
 
 from study_guide.config import Settings
+from study_guide.study_modes import validate_material_type, validate_study_scopes
 
 
 class DatabaseError(RuntimeError):
@@ -38,7 +39,7 @@ def list_documents(client: Any) -> list[dict[str, Any]]:
         documents = _data(
             client.table("documents")
             .select(
-                "id,display_name,status,safe_error,file_size_bytes,active_version_id,created_at,updated_at"
+                "id,display_name,status,safe_error,file_size_bytes,active_version_id,material_type,study_scopes,created_at,updated_at"
             )
             .order("updated_at", desc=True)
             .execute()
@@ -69,6 +70,7 @@ def search_active_chunks(
     *,
     match_count: int = 8,
     min_similarity: float = 0.70,
+    study_scope: str | None = None,
 ) -> list[dict[str, Any]]:
     if (
         len(query_embedding) != 768
@@ -81,11 +83,12 @@ def search_active_chunks(
     try:
         rows = _data(
             client.rpc(
-                "match_chunks",
+                "match_chunks_by_scope" if study_scope else "match_chunks",
                 {
                     "query_embedding": query_embedding,
                     "match_count": match_count,
                     "min_similarity": min_similarity,
+                    **({"study_scope": study_scope} if study_scope else {}),
                 },
             ).execute()
         ) or []
@@ -112,7 +115,7 @@ def get_document(client: Any, document_id: str) -> dict[str, Any]:
     try:
         rows = _data(
             client.table("documents")
-            .select("id,display_name,object_path,content_hash,status,active_version_id")
+            .select("id,display_name,object_path,content_hash,status,active_version_id,material_type,study_scopes")
             .eq("id", document_id)
             .limit(1)
             .execute()
@@ -122,6 +125,122 @@ def get_document(client: Any, document_id: str) -> dict[str, Any]:
     if not rows:
         raise DatabaseError("Document does not exist")
     return rows[0]
+
+
+def update_document_classification(
+    client: Any, document_id: str, material_type: str, study_scopes: tuple[str, ...]
+) -> None:
+    try:
+        material_type = validate_material_type(material_type)
+        study_scopes = validate_study_scopes(study_scopes)
+    except ValueError as exc:
+        raise DatabaseError(str(exc)) from exc
+    try:
+        client.table("documents").update(
+            {"material_type": material_type, "study_scopes": list(study_scopes), "updated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", document_id).execute()
+    except Exception as exc:
+        raise DatabaseError("Document classification could not be saved") from exc
+
+
+def insert_question_candidates(client: Any, rows: list[dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+    try:
+        result = client.table("question_candidates").upsert(
+            rows, on_conflict="version_id,content_hash", ignore_duplicates=True
+        ).execute()
+        return len(_data(result) or [])
+    except Exception as exc:
+        raise DatabaseError("Question drafts could not be saved") from exc
+
+
+def list_question_candidates(client: Any, status: str = "draft") -> list[dict[str, Any]]:
+    try:
+        rows = _data(
+            client.table("question_candidates")
+            .select("id,document_id,version_id,page_number,source_kind,prompt,options,correct_index,explanation,difficulty,topic_id,study_scopes,status,updated_at")
+            .eq("status", status)
+            .order("updated_at", desc=True)
+            .limit(200)
+            .execute()
+        ) or []
+        document_ids = list({row["document_id"] for row in rows})
+        documents = []
+        if document_ids:
+            documents = _data(
+                client.table("documents").select("id,display_name").in_("id", document_ids).execute()
+            ) or []
+    except Exception as exc:
+        raise DatabaseError("Question drafts could not be loaded") from exc
+    names = {row["id"]: row["display_name"] for row in documents}
+    for row in rows:
+        row["display_name"] = names.get(row["document_id"], "Course material")
+    return rows
+
+
+def update_question_candidate(client: Any, candidate_id: str, values: dict[str, Any]) -> None:
+    if values.get("status") == "approved":
+        options = values.get("options")
+        if (
+            not isinstance(options, list)
+            or len(options) != 4
+            or len({str(option).strip() for option in options if str(option).strip()}) != 4
+            or not values.get("explanation")
+            or not values.get("topic_id")
+        ):
+            raise DatabaseError("Approved questions must be complete")
+    try:
+        client.table("question_candidates").update(
+            {**values, "updated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", candidate_id).execute()
+    except Exception as exc:
+        raise DatabaseError("Question review could not be saved") from exc
+
+
+def list_approved_questions(
+    client: Any, topic_id: str, study_scope: str | None
+) -> list[dict[str, Any]]:
+    try:
+        query = (
+            client.table("question_candidates")
+            .select("id,document_id,page_number,source_kind,prompt,options,correct_index,explanation,difficulty")
+            .eq("status", "approved")
+            .eq("topic_id", topic_id)
+        )
+        if study_scope:
+            query = query.contains("study_scopes", [study_scope])
+        rows = _data(query.order("source_kind").limit(200).execute()) or []
+        document_ids = list({row["document_id"] for row in rows})
+        documents = []
+        if document_ids:
+            documents = _data(
+                client.table("documents").select("id,display_name").in_("id", document_ids).execute()
+            ) or []
+    except Exception as exc:
+        raise DatabaseError("Reviewed questions could not be loaded") from exc
+    names = {row["id"]: row["display_name"] for row in documents}
+    for row in rows:
+        row["display_name"] = names.get(row["document_id"], "Course material")
+    rows.sort(key=lambda row: row.get("source_kind") != "questions")
+    return rows
+
+
+def list_approved_question_topic_ids(
+    client: Any, study_scope: str | None
+) -> set[str]:
+    try:
+        query = (
+            client.table("question_candidates")
+            .select("topic_id")
+            .eq("status", "approved")
+        )
+        if study_scope:
+            query = query.contains("study_scopes", [study_scope])
+        rows = _data(query.limit(1000).execute()) or []
+        return {row["topic_id"] for row in rows if isinstance(row.get("topic_id"), str)}
+    except Exception as exc:
+        raise DatabaseError("Reviewed questions could not be loaded") from exc
 
 
 def upload_pdf(client: Any, object_path: str, data: bytes) -> None:

@@ -187,6 +187,16 @@ These are pilot thresholds, not a claim of zero hallucinations. Results must be 
 - Voice, mobile apps, multilingual output, and collaborative chats.
 - Guaranteed uptime or support for all 120 students asking questions simultaneously on free tiers.
 
+## Version 3 Addendum — Structured Study Modes and Question Sources
+
+- **V3-DOC-01:** Every upload must be classified as Theory or Questions and tagged with at least one of Mid Sem, End Sem or Class Quiz.
+- **V3-MODE-01:** Students can choose Mid Sem, End Sem, Class Quiz or Overall; Overall is the union of stored tags.
+- **V3-RAG-01:** Study retrieval must filter active ready documents by the selected stored tag, except Overall.
+- **V3-EXT-01:** Question uploads are the primary extraction source; Theory contributes candidates only from explicit question/exercise/problem sections.
+- **V3-REV-01:** No extracted candidate is student-visible until an admin completes and approves a valid four-option MCQ with answer, explanation, difficulty, topic, coverage and source page.
+- **V3-QUIZ-01:** Approved uploaded questions are sampled before the existing reviewed bank, which remains the fallback when a difficulty bucket is short.
+- **V3-SEC-01:** Draft/rejected questions and source PDFs remain server-only; student attempts continue to store summaries rather than question content.
+
 ## 9. Dependencies and Open Decisions
 
 G3 must compare and obtain user approval for:

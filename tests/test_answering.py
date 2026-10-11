@@ -73,6 +73,20 @@ def test_retrieval_uses_bounded_active_chunk_search() -> None:
     assert retrieve_evidence(Client(), [0.1] * 768) == [{"chunk_id": "c1"}]
 
 
+def test_retrieval_uses_study_scope_when_selected() -> None:
+    class Rpc:
+        def execute(self) -> object:
+            return type("Result", (), {"data": []})()
+
+    class Client:
+        def rpc(self, name: str, args: dict[str, object]) -> Rpc:
+            assert name == "match_chunks_by_scope"
+            assert args["study_scope"] == "mid_sem"
+            return Rpc()
+
+    assert retrieve_evidence(Client(), [0.1] * 768, "mid_sem") == []
+
+
 def test_answer_citations_are_mapped_only_from_retrieved_metadata() -> None:
     rows = [
         {

@@ -249,3 +249,10 @@ Show one row per student/topic with institutional email, topic, mastery, latest 
 ### 11.10 V2-G4 Approval Decisions
 
 Approval confirms the deterministic graph boundary, no LangGraph persistence, summary-only Supabase records, institutional-email admin analytics, manual course-end deletion, the student Quiz/Progress screens and the admin Topics/Student Progress screens described above.
+
+## V3 UI Addendum — 2026-10-11
+
+- A persistent sidebar Study mode selector uses Mid Sem, End Sem, Class Quiz and Overall; Overall is the safe default.
+- Documents adds required Material type and Coverage controls, displays the saved classification, and exposes an explicit “Extract question drafts” action only for ready documents.
+- Question review is an admin page. Each draft shows its source PDF/page and one form for prompt, four options, correct option, explanation, difficulty, topic and coverage, with Save draft / Approve / Reject actions.
+- The student Adaptive Quiz UI stays unchanged apart from respecting the shared mode. Approved extracted questions blend into the existing seven-question flow, citations and mastery behavior.

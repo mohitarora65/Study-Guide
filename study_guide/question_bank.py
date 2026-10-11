@@ -82,20 +82,57 @@ def generate_bank_quiz(
     topic: str,
     mastery_before: int | None,
     *,
+    source_questions: list[dict[str, Any]] | None = None,
     rng: Any | None = None,
 ) -> GeneratedQuiz:
     topic = validate_topic_name(topic)
     mix = difficulty_mix(mastery_before)
-    questions = QUESTION_BANK.get(topic.casefold())
-    if questions is None:
+    bank_questions = QUESTION_BANK.get(topic.casefold())
+    reviewed: list[_BankQuestion] = []
+    citations: dict[str, dict[str, Any]] = {}
+    for row in source_questions or []:
+        options = row.get("options")
+        if (
+            isinstance(row.get("prompt"), str)
+            and isinstance(options, list)
+            and len(options) == 4
+            and all(isinstance(option, str) and option.strip() for option in options)
+            and isinstance(row.get("correct_index"), int)
+            and 0 <= row["correct_index"] < 4
+            and row.get("difficulty") in {"easy", "medium", "hard"}
+            and isinstance(row.get("explanation"), str)
+            and row["explanation"].strip()
+            and isinstance(row.get("page_number"), int)
+        ):
+            question = _q(
+                row["prompt"].strip(),
+                tuple(option.strip() for option in options),  # type: ignore[arg-type]
+                row["correct_index"],
+                row["difficulty"],
+                row["explanation"].strip(),
+                row["page_number"],
+            )
+            reviewed.append(question)
+            citations[question.prompt] = {
+                "display_name": row.get("display_name") or "Course material",
+                "page_number": question.page,
+            }
+    if bank_questions is None and not reviewed:
         raise QuizError("No reviewed questions are available for this topic yet.")
+    fallback = tuple(
+        question for question in (bank_questions or ())
+        if question.prompt.casefold() not in {item.prompt.casefold() for item in reviewed}
+    )
     rng = rng or SystemRandom()
     selected: list[_BankQuestion] = []
     for level, count in mix.items():
-        candidates = [question for question in questions if question.difficulty == level]
-        if len(candidates) < count:
+        source_candidates = [question for question in reviewed if question.difficulty == level]
+        fallback_candidates = [question for question in fallback if question.difficulty == level]
+        if len(source_candidates) + len(fallback_candidates) < count:
             raise QuizError("No reviewed questions are available for this mastery level yet.")
-        selected.extend(rng.sample(candidates, count))
+        source_count = min(count, len(source_candidates))
+        selected.extend(rng.sample(source_candidates, source_count))
+        selected.extend(rng.sample(fallback_candidates, count - source_count))
     rng.shuffle(selected)
 
     rendered: list[QuizQuestion] = []
@@ -108,7 +145,7 @@ def generate_bank_quiz(
             correct_index=order.index(question.correct_index),
             difficulty=question.difficulty,
             explanation=question.explanation,
-            citations=({"display_name": "lA notes.pdf", "page_number": question.page},),
+            citations=(citations.get(question.prompt, {"display_name": "lA notes.pdf", "page_number": question.page}),),
         ))
     return GeneratedQuiz(
         topic=topic,
