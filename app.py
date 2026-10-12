@@ -183,12 +183,6 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
         for message in messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
-                for citation in message.get("citations") or []:
-                    if isinstance(citation, dict) and isinstance(citation.get("page_number"), int):
-                        st.write(
-                            f"{citation.get('display_name', 'Course material')} · "
-                            f"PDF page {citation['page_number']}"
-                        )
 
     question = st.chat_input(
         "Ask a question from your course material…",

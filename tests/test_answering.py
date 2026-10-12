@@ -356,7 +356,7 @@ def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyP
     assert "Streamlit-compatible Markdown" in system_prompt
     assert "lead with the direct answer" in system_prompt
     assert "display mathematics in $$ on separate lines" in system_prompt
-    assert "citations are rendered separately" in system_prompt
+    assert "Do not include citations, references or a sources section" in system_prompt
     request_data = json.loads(requests[0][1]["content"])  # type: ignore[index]
     assert request_data["recent_conversation"] == [{"role": "user", "content": "Why is that?"}]
 

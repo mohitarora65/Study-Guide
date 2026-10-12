@@ -34,7 +34,10 @@ def extract_question_candidates(
     for page in pages:
         lines = [line.strip() for line in page.text.splitlines() if line.strip()]
         if material_type == "theory":
-            theory_section = any(_THEORY_HEADING.fullmatch(line.rstrip(":")) for line in lines)
+            # shortcut: question mode lasts to EOF; add end-heading detection if it drafts later numbered text.
+            theory_section = theory_section or any(
+                _THEORY_HEADING.fullmatch(line.rstrip(":")) for line in lines
+            )
         if not theory_section:
             continue
 

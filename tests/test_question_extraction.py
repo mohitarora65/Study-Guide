@@ -24,12 +24,13 @@ def test_theory_only_extracts_from_explicit_question_section() -> None:
         (
             _page(1, "1. This numbered theory point is ignored."),
             _page(2, "Review Questions\n1) What is a basis?"),
+            _page(3, "2) What is dimension?"),
         ),
         "theory",
     )
 
-    assert [question.prompt for question in questions] == ["What is a basis?"]
-    assert questions[0].page_number == 2
+    assert [question.prompt for question in questions] == ["What is a basis?", "What is dimension?"]
+    assert [question.page_number for question in questions] == [2, 3]
 
 
 def test_candidate_rows_keep_source_and_coverage() -> None:

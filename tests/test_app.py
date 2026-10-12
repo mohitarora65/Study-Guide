@@ -136,6 +136,7 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert app.chat_input[0].disabled
     assert app.selectbox[0].value == "thread-1"
     assert app.session_state["history_read"] == ("synthetic-owner", "thread-1")
+    assert not any("notes.pdf" in element.value for element in app.markdown)
 
 
 def test_study_submits_question_and_saves_answer_without_live_providers() -> None:
