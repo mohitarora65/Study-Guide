@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from pypdf import PdfReader
+import voyageai
 
 from study_guide import database
 from study_guide.embeddings import (
@@ -26,7 +27,11 @@ MAX_PDF_BYTES = 25 * 1024 * 1024
 LOW_TEXT_CHAR_LIMIT = 100
 CHUNK_CHARS = 2_400
 CHUNK_OVERLAP = 250
-EMBEDDING_BATCH_SIZE = 6
+EMBEDDING_BATCH_TOKEN_LIMIT = 9_800
+EMBEDDING_BATCH_ITEM_LIMIT = 128
+EMBEDDING_BATCH_DELAY_SECONDS = 61
+
+_VOYAGE_TOKENIZER = voyageai.Client()
 
 
 class IngestionError(RuntimeError):
@@ -203,22 +208,72 @@ def _is_transient(exc: Exception) -> bool:
     }
 
 
+def _embedding_token_counts(texts: list[str]) -> list[int]:
+    return [
+        len(tokens)
+        for tokens in _VOYAGE_TOKENIZER.tokenize(texts, model=EMBEDDING_MODEL)
+    ]
+
+
+def _embedding_batches(
+    chunks: tuple[Chunk, ...],
+    token_counter: Callable[[list[str]], list[int]],
+) -> list[tuple[Chunk, ...]]:
+    try:
+        counts = token_counter([chunk.content for chunk in chunks])
+    except Exception as exc:
+        raise IngestionError(
+            "EMBEDDING_TOKENIZATION_FAILED",
+            "The document could not be prepared for embedding. Try again.",
+        ) from exc
+    if len(counts) != len(chunks) or any(
+        not isinstance(count, int) or isinstance(count, bool) or count <= 0
+        for count in counts
+    ):
+        raise IngestionError(
+            "EMBEDDING_TOKENIZATION_FAILED",
+            "The document could not be prepared for embedding. Try again.",
+        )
+
+    batches: list[tuple[Chunk, ...]] = []
+    batch: list[Chunk] = []
+    batch_tokens = 0
+    for chunk, token_count in zip(chunks, counts, strict=True):
+        if token_count > EMBEDDING_BATCH_TOKEN_LIMIT:
+            raise IngestionError(
+                "EMBEDDING_CHUNK_TOO_LARGE",
+                "A document section is too large to embed safely.",
+            )
+        if batch and (
+            batch_tokens + token_count > EMBEDDING_BATCH_TOKEN_LIMIT
+            or len(batch) == EMBEDDING_BATCH_ITEM_LIMIT
+        ):
+            batches.append(tuple(batch))
+            batch = []
+            batch_tokens = 0
+        batch.append(chunk)
+        batch_tokens += token_count
+    if batch:
+        batches.append(tuple(batch))
+    return batches
+
+
 def embed_chunks(
     chunks: tuple[Chunk, ...],
     api_key: str,
     *,
     embedder: Callable[..., list[list[float]]] = embed_texts,
     sleep: Callable[[float], None] = time.sleep,
+    token_counter: Callable[[list[str]], list[int]] = _embedding_token_counts,
 ) -> list[list[float]]:
     if not api_key:
         raise IngestionError("VOYAGE_NOT_CONFIGURED", "Voyage is not configured yet.")
     vectors: list[list[float]] = []
 
-    for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
-        if offset:
-            # shortcut: pace for Voyage's current free-tier 3 RPM limit.
-            sleep(21)
-        batch = chunks[offset : offset + EMBEDDING_BATCH_SIZE]
+    for index, batch in enumerate(_embedding_batches(chunks, token_counter)):
+        if index:
+            # shortcut: one nearly full TPM batch per rate window.
+            sleep(EMBEDDING_BATCH_DELAY_SECONDS)
         for attempt in range(2):
             try:
                 vectors.extend(

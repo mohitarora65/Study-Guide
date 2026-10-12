@@ -1,6 +1,6 @@
 # Operations — Grounded Mathematics Study Guide
 
-**Status:** V3 and the Voyage migration are deployed. The active document was successfully re-indexed with Voyage on 2026-10-12; retrieval/citation verification remains pending.
+**Status:** V3 and the Voyage migration are deployed. The active document and the calibrated `0.46` retrieval threshold passed the supported-citation and unsupported-refusal production smoke on 2026-10-12. Token-aware long-document batching is local and awaits deployment.
 **Last updated:** 2026-10-12
 
 ## Deployment target
@@ -93,7 +93,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Check Supabase project availability/storage and provider dashboards when answer or ingestion flows fail.
 - AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
 - Study answers use the primary AI STAR model first. Only timeout/network, HTTP 429 and HTTP 5xx failures receive the single fallback attempt; authentication, request-validation and malformed-output failures remain non-retryable.
-- Voyage embedding failures affect new ingestion and question retrieval. Document indexing uses six-chunk batches with 21 seconds between calls; HTTP 429 waits 61 seconds before its single bounded retry. Do not click re-index again while a run is still active.
+- Voyage embedding failures affect new ingestion and question retrieval. Document indexing uses model-specific token-aware batches capped at 9,800 tokens with one 61-second rate window between calls; HTTP 429 waits another rate window before its single bounded retry. Do not click re-index again while a run is still active.
 - Do not re-index or delete the ready course document as a health check.
 - Student quiz creation is local and does not consume provider balance.
 - V2.2's three approved synthetic generations reached the provider's output-length limit. V2.3's Rank set and V2.5's Eigenvalues set passed manual source review. V2.8's raw SVD diagnostic stopped normally at 4,761/5,000 completion tokens and passed structural validation, but V2.9's normal application path still truncated at 6,000. The runtime cap was restored to 5,000. This variability makes further cap increases a poor reliability strategy. Do not make another call, change reasoning behavior, switch providers/models or redesign the workflow without approval; authenticated quiz browser/accessibility checks remain not tested.
@@ -149,12 +149,12 @@ Use this only for an explicitly approved migration/cutover, not routine health c
 | Approved scope and planning | PASS | G0–G5 and V1.1–V1.5 phase files exist; V1.1–V1.4 are signed off and V1.5 is approved. |
 | Core local functionality | PASS | V1.4 evaluation thresholds passed; current full regression must pass again before deployment. |
 | Authentication/authorization | PASS locally | Google Admin login and automated domain/ownership tests passed; deployed callback and optional real wrong-domain flow remain. |
-| Grounding/citations/refusal | PASS locally | TA-reviewed 40-question result passed all five PRD thresholds; A09 false refusal is accepted. |
+| Grounding/citations/refusal | PASS | TA-reviewed 40-question result passed all five PRD thresholds; the deployed Voyage smoke answered with pages 8 and 10 and refused an unsupported heat-equation question. A09 false refusal is accepted. |
 | Security/privacy | PASS with known provider risk | Server-held secrets, private Storage, exact-domain/admin checks and prompt/citation validation exist. AI STAR retention remains unknown and accepted. |
 | Dependencies | PASS locally | Latest V1.4 OSV scan covered 74 installed distributions with zero advisories after pip remediation; rerun before deployment. |
 | Accessibility | PASS with limits | Light-theme contrast, keyboard focus and 390-pixel width passed. Dark theme and a separate student-account browser session were not tested. |
 | Performance/capacity | PARTIAL | Health/latency/memory and a three-request answer burst were measured. Class-wide capacity is not established. |
-| Deployment | PASS with pending retrieval evidence | The app is deployed from dedicated `main` and the Voyage re-index succeeded; retrieval/citation verification remains pending. |
+| Deployment | PASS for the active source | The app is deployed from dedicated `main`; the Voyage re-index and supported/unsupported retrieval smoke succeeded. Token-aware MML batching remains local. |
 | Rollback/operations | PASS as procedure | This document defines response and rollback; real execution remains untested until deployment. |
 
 Final release status cannot exceed **controlled pilot candidate** until the real URL and deployed critical paths pass and the user explicitly approves release.

@@ -124,7 +124,7 @@ def _chunk(text: str = "course text") -> Chunk:
     return Chunk(1, 0, text, "hash")
 
 
-def test_embeds_in_fixed_batches_and_dimension() -> None:
+def test_embeds_in_token_bounded_batches_and_dimension() -> None:
     calls: list[tuple[list[str], str, str]] = []
     delays: list[float] = []
 
@@ -139,13 +139,59 @@ def test_embeds_in_fixed_batches_and_dimension() -> None:
         "key",
         embedder=embedder,
         sleep=delays.append,
+        token_counter=lambda texts: [300] * len(texts),
     )
 
-    assert [len(call[0]) for call in calls] == [6, 6, 6, 6, 6, 3]
-    assert delays == [21, 21, 21, 21, 21]
+    assert [len(call[0]) for call in calls] == [32, 1]
+    assert delays == [61]
     assert calls[0][1:] == ("key", "document")
     assert len(vectors[0]) == 1024
     assert len(vectors) == 33
+
+
+def test_embedding_batches_keep_provider_item_limit() -> None:
+    calls: list[list[str]] = []
+    delays: list[float] = []
+
+    def embedder(
+        texts: list[str], _api_key: str, *, input_type: str
+    ) -> list[list[float]]:
+        assert input_type == "document"
+        calls.append(texts)
+        return [[0.1] * 1024 for _ in texts]
+
+    embed_chunks(
+        tuple(_chunk(str(index)) for index in range(130)),
+        "key",
+        embedder=embedder,
+        sleep=delays.append,
+        token_counter=lambda texts: [1] * len(texts),
+    )
+
+    assert [len(call) for call in calls] == [128, 2]
+    assert delays == [61]
+
+
+def test_embedding_tokenization_failure_is_safe() -> None:
+    def fail(_texts: list[str]) -> list[int]:
+        raise RuntimeError("private tokenizer detail")
+
+    with pytest.raises(IngestionError) as error:
+        embed_chunks((_chunk(),), "key", token_counter=fail)
+
+    assert error.value.code == "EMBEDDING_TOKENIZATION_FAILED"
+    assert "private tokenizer detail" not in str(error.value)
+
+
+def test_rejects_chunk_over_safe_embedding_token_limit() -> None:
+    with pytest.raises(IngestionError) as error:
+        embed_chunks(
+            (_chunk(),),
+            "key",
+            token_counter=lambda _texts: [9_801],
+        )
+
+    assert error.value.code == "EMBEDDING_CHUNK_TOO_LARGE"
 
 
 def test_retries_one_transient_embedding_failure() -> None:
@@ -164,6 +210,7 @@ def test_retries_one_transient_embedding_failure() -> None:
             "key",
             embedder=embedder,
             sleep=lambda _seconds: None,
+            token_counter=lambda _texts: [2],
         )
     ) == 1
     assert attempts == 2
@@ -184,6 +231,7 @@ def test_reports_exhausted_embedding_quota_after_retry() -> None:
             "key",
             embedder=embedder,
             sleep=delays.append,
+            token_counter=lambda _texts: [2],
         )
 
     assert attempts == 2
@@ -201,7 +249,12 @@ def test_does_not_retry_non_transient_embedding_failure() -> None:
         raise EmbeddingProviderError(status_code=401)
 
     with pytest.raises(IngestionError) as error:
-        embed_chunks((_chunk(),), "key", embedder=embedder)
+        embed_chunks(
+            (_chunk(),),
+            "key",
+            embedder=embedder,
+            token_counter=lambda _texts: [2],
+        )
 
     assert attempts == 1
     assert error.value.code == "EMBEDDING_FAILED"
@@ -212,7 +265,12 @@ def test_invalid_embedding_dimension_fails_safely() -> None:
         raise InvalidEmbeddingResponse()
 
     with pytest.raises(IngestionError, match="invalid response") as error:
-        embed_chunks((_chunk(),), "key", embedder=embedder)
+        embed_chunks(
+            (_chunk(),),
+            "key",
+            embedder=embedder,
+            token_counter=lambda _texts: [2],
+        )
     assert str(error.value) == "The embedding provider returned an invalid response."
 
 
