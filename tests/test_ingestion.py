@@ -126,6 +126,7 @@ def _chunk(text: str = "course text") -> Chunk:
 
 def test_embeds_in_fixed_batches_and_dimension() -> None:
     calls: list[tuple[list[str], str, str]] = []
+    delays: list[float] = []
 
     def embedder(
         texts: list[str], api_key: str, *, input_type: str
@@ -137,9 +138,11 @@ def test_embeds_in_fixed_batches_and_dimension() -> None:
         tuple(_chunk(str(index)) for index in range(33)),
         "key",
         embedder=embedder,
+        sleep=delays.append,
     )
 
-    assert len(calls) == 2
+    assert [len(call[0]) for call in calls] == [6, 6, 6, 6, 6, 3]
+    assert delays == [21, 21, 21, 21, 21]
     assert calls[0][1:] == ("key", "document")
     assert len(vectors[0]) == 1024
     assert len(vectors) == 33

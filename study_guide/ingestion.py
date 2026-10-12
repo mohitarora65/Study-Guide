@@ -26,7 +26,7 @@ MAX_PDF_BYTES = 25 * 1024 * 1024
 LOW_TEXT_CHAR_LIMIT = 100
 CHUNK_CHARS = 2_400
 CHUNK_OVERLAP = 250
-EMBEDDING_BATCH_SIZE = 32
+EMBEDDING_BATCH_SIZE = 6
 
 
 class IngestionError(RuntimeError):
@@ -215,6 +215,9 @@ def embed_chunks(
     vectors: list[list[float]] = []
 
     for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
+        if offset:
+            # shortcut: pace for Voyage's current free-tier 3 RPM limit.
+            sleep(21)
         batch = chunks[offset : offset + EMBEDDING_BATCH_SIZE]
         for attempt in range(2):
             try:
