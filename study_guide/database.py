@@ -56,13 +56,96 @@ def list_documents(client: Any) -> list[dict[str, Any]]:
                 .in_("id", active_ids)
                 .execute()
             ) or []
+        if documents:
+            runs = _data(
+                client.table("ingestion_runs")
+                .select("document_id,version_id,status,updated_at,created_at")
+                .in_("document_id", [row["id"] for row in documents])
+                .order("created_at", desc=True)
+                .execute()
+            ) or []
+        else:
+            runs = []
     except Exception as exc:
         raise DatabaseError("Documents could not be loaded") from exc
 
     versions_by_id = {row["id"]: row for row in versions}
+    latest_run_by_document: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        latest_run_by_document.setdefault(run["document_id"], run)
     for document in documents:
         document["active_version"] = versions_by_id.get(document["active_version_id"])
+        document["latest_ingestion_run"] = latest_run_by_document.get(document["id"])
     return documents
+
+
+def prepare_ingestion_chunks(client: Any, version_id: str, chunks: Any) -> None:
+    try:
+        client.table("chunks").upsert(
+            [
+                {
+                    "version_id": version_id,
+                    "page_number": chunk.page_number,
+                    "chunk_order": chunk.chunk_order,
+                    "content": chunk.content,
+                    "content_hash": chunk.content_hash,
+                    "embedding": None,
+                    "voyage_embedding": None,
+                }
+                for chunk in chunks
+            ],
+            on_conflict="version_id,page_number,chunk_order",
+            ignore_duplicates=True,
+        ).execute()
+    except Exception as exc:
+        raise DatabaseError("Document chunks could not be prepared") from exc
+
+
+def pending_ingestion_chunks(client: Any, version_id: str) -> list[dict[str, Any]]:
+    try:
+        return _data(
+            client.table("chunks")
+            .select("page_number,chunk_order,content,content_hash")
+            .eq("version_id", version_id)
+            .is_("voyage_embedding", "null")
+            .order("page_number")
+            .order("chunk_order")
+            .execute()
+        ) or []
+    except Exception as exc:
+        raise DatabaseError("Pending document chunks could not be loaded") from exc
+
+
+def save_voyage_embedding_batch(
+    client: Any, version_id: str, rows: list[dict[str, Any]]
+) -> None:
+    try:
+        client.rpc(
+            "save_voyage_embedding_batch",
+            {"p_version_id": version_id, "p_chunks": rows},
+        ).execute()
+    except Exception as exc:
+        raise DatabaseError("Embedded document chunks could not be saved") from exc
+
+
+def claim_document_ingestion(
+    client: Any, document_id: str, *, stale_seconds: int = 180
+) -> tuple[str, str]:
+    try:
+        rows = _data(
+            client.rpc(
+                "claim_document_ingestion",
+                {
+                    "p_document_id": document_id,
+                    "p_stale_seconds": stale_seconds,
+                },
+            ).execute()
+        ) or []
+    except Exception as exc:
+        raise DatabaseError("Document indexing could not be resumed") from exc
+    if not rows:
+        raise DatabaseError("Document indexing is already running")
+    return rows[0]["version_id"], rows[0]["run_id"]
 
 
 def search_active_chunks(

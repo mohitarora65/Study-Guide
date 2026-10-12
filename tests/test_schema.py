@@ -6,6 +6,7 @@ INGESTION_SCHEMA = Path("supabase/migrations/002_ingestion.sql").read_text()
 QUIZ_SCHEMA = Path("supabase/migrations/003_adaptive_quiz.sql").read_text()
 V3_SCHEMA = Path("supabase/migrations/004_study_modes_and_questions.sql").read_text()
 VOYAGE_SCHEMA = Path("supabase/migrations/005_voyage_embeddings.sql").read_text()
+RESUMABLE_SCHEMA = Path("supabase/migrations/006_resumable_ingestion.sql").read_text()
 
 
 def test_schema_contains_required_tables_and_vector_column() -> None:
@@ -109,3 +110,13 @@ def test_voyage_schema_is_additive_private_and_1024_dimensional() -> None:
     assert "c.voyage_embedding is not null" in VOYAGE_SCHEMA
     assert VOYAGE_SCHEMA.count("from public, anon, authenticated") == 2
     assert VOYAGE_SCHEMA.count("to service_role") == 2
+
+
+def test_resumable_ingestion_schema_persists_batches_and_claims_stale_runs() -> None:
+    assert "where status = 'processing'" in RESUMABLE_SCHEMA
+    assert "function public.save_voyage_embedding_batch" in RESUMABLE_SCHEMA
+    assert "function public.claim_document_ingestion" in RESUMABLE_SCHEMA
+    assert "updated_at = now()" in RESUMABLE_SCHEMA
+    assert "for update of r skip locked" in RESUMABLE_SCHEMA
+    assert RESUMABLE_SCHEMA.count("to service_role") == 2
+    assert RESUMABLE_SCHEMA.count("from public, anon, authenticated") == 2

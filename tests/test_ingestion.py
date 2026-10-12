@@ -149,6 +149,26 @@ def test_embeds_in_token_bounded_batches_and_dimension() -> None:
     assert len(vectors) == 33
 
 
+def test_embedding_batches_are_saved_before_next_batch() -> None:
+    events: list[str] = []
+
+    def embedder(texts: list[str], _key: str, *, input_type: str) -> list[list[float]]:
+        assert input_type == "document"
+        events.append(f"embed:{len(texts)}")
+        return [[0.1] * 1024 for _ in texts]
+
+    embed_chunks(
+        tuple(_chunk(str(index)) for index in range(2)),
+        "key",
+        embedder=embedder,
+        sleep=lambda _seconds: events.append("wait"),
+        token_counter=lambda texts: [8_000] * len(texts),
+        on_batch=lambda batch, _vectors: events.append(f"save:{len(batch)}"),
+    )
+
+    assert events == ["embed:1", "save:1", "wait", "embed:1", "save:1"]
+
+
 def test_embedding_batches_keep_provider_item_limit() -> None:
     calls: list[list[str]] = []
     delays: list[float] = []
@@ -314,12 +334,25 @@ def test_completed_ingestion_activates_only_after_chunks_are_stored(
     monkeypatch.setattr(
         database, "create_document_records", lambda *_args, **_kwargs: events.append("records")
     )
-    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 1024])
-    def insert_chunks(_client: object, rows: list[dict[str, object]]) -> None:
+    monkeypatch.setattr(database, "prepare_ingestion_chunks", lambda *_args: events.append("prepare"))
+    monkeypatch.setattr(
+        database,
+        "pending_ingestion_chunks",
+        lambda *_args: [{"page_number": 1, "chunk_order": 0, "content": "course text", "content_hash": "hash"}],
+    )
+
+    def fake_embed(_chunks: object, _key: str, *, on_batch: object) -> list[list[float]]:
+        vectors = [[0.1] * 1024]
+        on_batch((_chunk(),), vectors)  # type: ignore[operator]
+        return vectors
+
+    monkeypatch.setattr(ingestion, "embed_chunks", fake_embed)
+
+    def save_batch(_client: object, _version: str, rows: list[dict[str, object]]) -> None:
         stored["rows"] = rows
         events.append("chunks")
 
-    monkeypatch.setattr(database, "insert_chunks", insert_chunks)
+    monkeypatch.setattr(database, "save_voyage_embedding_batch", save_batch)
     monkeypatch.setattr(
         database, "activate_version", lambda *_args: events.append("activate")
     )
@@ -327,7 +360,7 @@ def test_completed_ingestion_activates_only_after_chunks_are_stored(
     result = ingest_pdf(object(), "key", "notes.pdf", "application/pdf", b"data")
 
     assert result.chunk_count == 1
-    assert events == ["upload", "records", "chunks", "activate"]
+    assert events == ["upload", "records", "prepare", "chunks", "activate"]
     rows = stored["rows"]
     assert isinstance(rows, list)
     assert len(rows[0]["voyage_embedding"]) == 1024  # type: ignore[arg-type,index]
@@ -375,10 +408,19 @@ def test_failed_ingestion_records_safe_failure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(database, "find_document_by_hash", lambda *_args: None)
     monkeypatch.setattr(database, "upload_pdf", lambda *_args: None)
     monkeypatch.setattr(database, "create_document_records", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 1024])
+    monkeypatch.setattr(
+        database, "prepare_ingestion_chunks", lambda *_args: None
+    )
+    monkeypatch.setattr(database, "pending_ingestion_chunks", lambda *_args: [_chunk().__dict__])
+
+    def fail_embed(_chunks: object, _key: str, *, on_batch: object) -> list[list[float]]:
+        on_batch((_chunk(),), [[0.1] * 1024])  # type: ignore[operator]
+        return []
+
+    monkeypatch.setattr(ingestion, "embed_chunks", fail_embed)
     monkeypatch.setattr(
         database,
-        "insert_chunks",
+        "save_voyage_embedding_batch",
         lambda *_args: (_ for _ in ()).throw(database.DatabaseError("private detail")),
     )
     monkeypatch.setattr(
@@ -422,7 +464,7 @@ def test_retry_creates_a_current_provider_version(monkeypatch: pytest.MonkeyPatc
         captured.update(client=client, api_key=api_key, document_id=document_id, progress=progress)
         return ingestion.IngestionOutcome(document_id, "notes.pdf", 1)
 
-    monkeypatch.setattr(ingestion, "reindex_document", reindex)
+    monkeypatch.setattr(ingestion, "resume_document_ingestion", reindex)
     progress = lambda _message: None
 
     result = retry_failed_document(object(), "key", "document", progress=progress)

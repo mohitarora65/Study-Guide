@@ -266,6 +266,7 @@ def embed_chunks(
     embedder: Callable[..., list[list[float]]] = embed_texts,
     sleep: Callable[[float], None] = time.sleep,
     token_counter: Callable[[list[str]], list[int]] = _embedding_token_counts,
+    on_batch: Callable[[tuple[Chunk, ...], list[list[float]]], None] = lambda _batch, _vectors: None,
 ) -> list[list[float]]:
     if not api_key:
         raise IngestionError("VOYAGE_NOT_CONFIGURED", "Voyage is not configured yet.")
@@ -277,13 +278,13 @@ def embed_chunks(
             sleep(EMBEDDING_BATCH_DELAY_SECONDS)
         for attempt in range(2):
             try:
-                vectors.extend(
-                    embedder(
-                        [chunk.content for chunk in batch],
-                        api_key,
-                        input_type="document",
-                    )
+                batch_vectors = embedder(
+                    [chunk.content for chunk in batch],
+                    api_key,
+                    input_type="document",
                 )
+                on_batch(batch, batch_vectors)
+                vectors.extend(batch_vectors)
                 break
             except InvalidEmbeddingResponse as exc:
                 raise IngestionError(
@@ -318,23 +319,33 @@ def _finish_ingestion(
 ) -> IngestionOutcome:
     try:
         progress("Creating embeddings")
-        vectors = embed_chunks(prepared.chunks, api_key)
-        progress("Saving page-linked chunks")
-        database.insert_chunks(
-            client,
-            [
-                {
-                    "id": str(uuid4()),
-                    "version_id": version_id,
-                    "page_number": chunk.page_number,
-                    "chunk_order": chunk.chunk_order,
-                    "content": chunk.content,
-                    "content_hash": chunk.content_hash,
-                    "voyage_embedding": vector,
-                }
-                for chunk, vector in zip(prepared.chunks, vectors, strict=True)
-            ],
+        database.prepare_ingestion_chunks(client, version_id, prepared.chunks)
+
+        def save_batch(batch: tuple[Chunk, ...], vectors: list[list[float]]) -> None:
+            database.save_voyage_embedding_batch(
+                client,
+                version_id,
+                [
+                    {
+                        "page_number": chunk.page_number,
+                        "chunk_order": chunk.chunk_order,
+                        "voyage_embedding": vector,
+                    }
+                    for chunk, vector in zip(batch, vectors, strict=True)
+                ],
+            )
+            progress(f"Saved embeddings for {len(batch)} chunks")
+
+        pending = tuple(
+            Chunk(
+                row["page_number"],
+                row["chunk_order"],
+                row["content"],
+                row["content_hash"],
+            )
+            for row in database.pending_ingestion_chunks(client, version_id)
         )
+        embed_chunks(pending, api_key, on_batch=save_batch)
         progress("Activating the completed version")
         database.activate_version(
             client,
@@ -447,8 +458,29 @@ def retry_failed_document(
     *,
     progress: Callable[[str], None] = lambda _message: None,
 ) -> IngestionOutcome:
-    # A retry gets current provider metadata instead of reviving an incompatible failed version.
-    return reindex_document(client, api_key, document_id, progress=progress)
+    return resume_document_ingestion(client, api_key, document_id, progress=progress)
+
+
+def resume_document_ingestion(
+    client: Any,
+    api_key: str,
+    document_id: str,
+    *,
+    progress: Callable[[str], None] = lambda _message: None,
+) -> IngestionOutcome:
+    document = database.get_document(client, document_id)
+    progress("Loading and validating the private source PDF")
+    prepared = prepare_pdf(
+        document["display_name"],
+        "application/pdf",
+        database.download_pdf(client, document["object_path"]),
+    )
+    if prepared.content_hash != document["content_hash"]:
+        raise IngestionError("SOURCE_CHANGED", "The stored source PDF failed validation.")
+    version_id, run_id = database.claim_document_ingestion(client, document_id)
+    return _finish_ingestion(
+        client, prepared, api_key, document_id, version_id, run_id, progress
+    )
 
 
 def reindex_document(

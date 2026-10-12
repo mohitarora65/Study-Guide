@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import streamlit as st
@@ -652,7 +653,22 @@ def render_documents_page(settings: Settings) -> None:
     for document in documents:
         with st.container(border=True):
             st.markdown(f"**{document['display_name']}**")
-            st.write(f"Status: {document['status']}")
+            latest_run = document.get("latest_ingestion_run") or {}
+            run_processing = latest_run.get("status") == "processing"
+            run_stale = False
+            if run_processing and latest_run.get("updated_at"):
+                updated_at = datetime.fromisoformat(
+                    latest_run["updated_at"].replace("Z", "+00:00")
+                )
+                run_stale = (datetime.now(timezone.utc) - updated_at).total_seconds() > 180
+            shown_status = (
+                "indexing interrupted; resume available"
+                if run_processing and run_stale
+                else "indexing in progress"
+                if run_processing
+                else document["status"]
+            )
+            st.write(f"Status: {shown_status}")
             st.caption(
                 f"{document.get('material_type', 'theory').title()} · "
                 + ", ".join(STUDY_MODE_LABELS[scope] for scope in document.get("study_scopes") or STUDY_SCOPES)
@@ -697,7 +713,7 @@ def render_documents_page(settings: Settings) -> None:
                         + ", ".join(str(page) for page in low_pages)
                         + ". OCR was not performed."
                     )
-            if document.get("safe_error"):
+            if document.get("safe_error") and not run_processing:
                 st.error(
                     error_messages.get(
                         document["safe_error"], "Indexing failed. Retry this document."
@@ -705,7 +721,43 @@ def render_documents_page(settings: Settings) -> None:
                 )
 
             first, second = st.columns(2)
-            if document["status"] == "failed":
+            if run_processing:
+                if first.button(
+                    "Resume indexing" if run_stale else "Indexing in progress",
+                    key=f"resume-{document['id']}",
+                    disabled=not run_stale or settings.voyage_api_key is None,
+                ):
+                    try:
+                        with st.status("Resuming PDF indexing", expanded=True) as status:
+                            retry_failed_document(
+                                client,
+                                settings.voyage_api_key or "",
+                                document["id"],
+                                progress=status.write,
+                            )
+                            status.update(label="Document is ready", state="complete")
+                        st.rerun()
+                    except (IngestionError, DatabaseError) as exc:
+                        st.error(str(exc))
+            elif latest_run.get("status") == "failed":
+                if first.button(
+                    "Resume indexing",
+                    key=f"resume-failed-{document['id']}",
+                    disabled=settings.voyage_api_key is None,
+                ):
+                    try:
+                        with st.status("Resuming PDF indexing", expanded=True) as status:
+                            retry_failed_document(
+                                client,
+                                settings.voyage_api_key or "",
+                                document["id"],
+                                progress=status.write,
+                            )
+                            status.update(label="Document is ready", state="complete")
+                        st.rerun()
+                    except (IngestionError, DatabaseError) as exc:
+                        st.error(str(exc))
+            elif document["status"] == "failed":
                 if first.button(
                     "Retry indexing",
                     key=f"retry-{document['id']}",
