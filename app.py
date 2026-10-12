@@ -257,7 +257,10 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         st.error(str(exc))
         return
     if not topics:
-        st.info("No reviewed quiz topics are available yet.")
+        st.info(
+            "No active topics with quiz questions are available. Built-in questions match by topic name; "
+            "approve course questions for other topics."
+        )
         return
 
     topic_by_id = {topic["id"]: topic for topic in topics}
@@ -487,13 +490,22 @@ def render_quiz_progress_page(settings: Settings, identity: Identity) -> None:
 
 def render_quiz_topics_page(settings: Settings) -> None:
     st.title("Quiz topics")
+    st.caption(
+        "Adaptive Quiz shows active topics with built-in questions matching the name or approved course questions. "
+        "New topics and renamed topics without a built-in match need approved course questions."
+    )
+    flash = st.session_state.pop("quiz_topics_flash", None)
+    if flash:
+        st.success(flash)
     client = build_client(settings)
     with st.form("new-quiz-topic", clear_on_submit=True):
-        name = st.text_input("New topic name", max_chars=100)
-        add = st.form_submit_button("Add topic", type="primary")
+        name_col, add_col = st.columns([5, 1])
+        name = name_col.text_input("New topic name", max_chars=100)
+        add = add_col.form_submit_button("Add topic", type="primary")
     if add:
         try:
             create_quiz_topic(client, name)
+            st.session_state.quiz_topics_flash = "Quiz topic added."
             st.rerun()
         except DatabaseError as exc:
             st.error(str(exc))
@@ -504,11 +516,19 @@ def render_quiz_topics_page(settings: Settings) -> None:
         return
     for topic in topics:
         with st.form(f"topic-{topic['id']}"):
-            updated_name = st.text_input("Topic", value=topic["name"], key=f"topic-name-{topic['id']}")
-            active = st.checkbox("Available to students", value=topic["active"], key=f"topic-active-{topic['id']}")
-            if st.form_submit_button("Save"):
+            name_col, active_col, save_col = st.columns([5, 2, 1])
+            updated_name = name_col.text_input(
+                "Topic", value=topic["name"], key=f"topic-name-{topic['id']}"
+            )
+            active = active_col.checkbox(
+                "Available to students",
+                value=topic["active"],
+                key=f"topic-active-{topic['id']}",
+            )
+            if save_col.form_submit_button("Save"):
                 try:
                     update_quiz_topic(client, topic["id"], name=updated_name, active=active)
+                    st.session_state.quiz_topics_flash = "Quiz topic saved."
                     st.rerun()
                 except DatabaseError as exc:
                     st.error(str(exc))

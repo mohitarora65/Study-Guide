@@ -350,7 +350,7 @@ with patch.object(app, "build_client", return_value=object()), \\
     app = AppTest.from_string(script).run()
 
     assert not app.exception
-    assert app.info[0].value == "No reviewed quiz topics are available yet."
+    assert "approve course questions for other topics" in app.info[0].value
     assert not any(button.label == "Start 7-question quiz" for button in app.button)
 
 
@@ -450,3 +450,30 @@ with patch.object(app, "build_client", return_value=object()), \\
 
     assert not app.exception
     assert app.session_state["created_topic"] == "Vector spaces"
+    assert app.success[0].value == "Quiz topic added."
+
+
+def test_admin_can_save_quiz_topic_and_see_confirmation() -> None:
+    script = '''
+import streamlit as st
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+
+topic = {"id": "topic-1", "name": "Vectors", "active": True}
+def update_topic(_client, topic_id, *, name, active):
+    st.session_state["saved_topic"] = (topic_id, name, active)
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_quiz_topics", return_value=[topic]), \\
+     patch.object(app, "update_quiz_topic", side_effect=update_topic):
+    app.render_quiz_topics_page(SimpleNamespace())
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+
+    app.text_input[1].set_value("Vector spaces")
+    next(button for button in app.button if button.label == "Save").click().run()
+
+    assert not app.exception
+    assert app.session_state["saved_topic"] == ("topic-1", "Vector spaces", True)
+    assert app.success[0].value == "Quiz topic saved."
