@@ -113,7 +113,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import app
 
-settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key=None)
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key=None)
 identity = SimpleNamespace(user_key="synthetic-owner")
 thread = {"id": "thread-1", "title": "Basis question"}
 messages = [
@@ -145,7 +145,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import app
 
-settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key="a" * 32)
 identity = SimpleNamespace(user_key="synthetic-owner")
 def save_turn(client, owner, thread_id, **values):
     st.session_state["saved_turn"] = (owner, thread_id, values)
@@ -181,7 +181,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import app
 
-settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key="a" * 32)
 identity = SimpleNamespace(user_key="synthetic-owner")
 def create(_client, _owner, title):
     st.session_state["created_title"] = title
@@ -213,7 +213,7 @@ from unittest.mock import patch
 import app
 from study_guide.quizzing import GeneratedQuiz, QuizQuestion
 
-settings = SimpleNamespace(gemini_api_key=None, ai_star_api_key=None)
+settings = SimpleNamespace(voyage_api_key=None, ai_star_api_key=None)
 identity = SimpleNamespace(
     user_key="synthetic-owner", email="student@iiti.ac.in", is_admin=False
 )
@@ -314,7 +314,7 @@ from unittest.mock import patch
 import app
 from study_guide.quizzing import QuizError
 
-settings = SimpleNamespace(gemini_api_key="g" * 32, ai_star_api_key="a" * 32)
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key="a" * 32)
 identity = SimpleNamespace(user_key="synthetic-owner", email="student@iiti.ac.in", is_admin=False)
 message = "The quiz could not be prepared. Please try again."
 with patch.object(app, "build_client", return_value=object()), \\

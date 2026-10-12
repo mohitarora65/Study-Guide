@@ -161,7 +161,7 @@ def test_quiz_provider_payload_excludes_student_identity() -> None:
     quiz = generate_quiz(
         "Vector spaces",
         mastery_before=None,
-        gemini_api_key="g" * 32,
+        voyage_api_key="v" * 32,
         ai_star_api_key="a" * 32,
         database_client=object(),
         user_key="opaque-private-owner-key",

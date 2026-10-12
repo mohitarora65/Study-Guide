@@ -9,6 +9,7 @@ from uuid import UUID
 from supabase import Client, create_client
 
 from study_guide.config import Settings
+from study_guide.embeddings import EMBEDDING_DIMENSION
 from study_guide.study_modes import validate_material_type, validate_study_scopes
 
 
@@ -73,7 +74,7 @@ def search_active_chunks(
     study_scope: str | None = None,
 ) -> list[dict[str, Any]]:
     if (
-        len(query_embedding) != 768
+        len(query_embedding) != EMBEDDING_DIMENSION
         or not all(math.isfinite(value) for value in query_embedding)
         or not any(value != 0 for value in query_embedding)
         or not 1 <= match_count <= 8
@@ -83,7 +84,7 @@ def search_active_chunks(
     try:
         rows = _data(
             client.rpc(
-                "match_chunks_by_scope" if study_scope else "match_chunks",
+                "match_chunks_voyage_by_scope" if study_scope else "match_chunks_voyage",
                 {
                     "query_embedding": query_embedding,
                     "match_count": match_count,

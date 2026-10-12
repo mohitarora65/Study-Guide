@@ -4,6 +4,7 @@ import pytest
 
 from study_guide.answering import (
     AI_STAR_BASE_URL,
+    AI_STAR_FALLBACK_MODEL,
     AI_STAR_MODEL,
     AnsweringError,
     INSUFFICIENT_MATERIAL,
@@ -24,37 +25,31 @@ def test_question_is_trimmed_and_bounded() -> None:
         validate_question("x" * (MAX_QUESTION_CHARS + 1))
 
 
-def test_query_embedding_uses_same_model_dimension_and_indexing_prefix() -> None:
-    class Models:
-        def embed_content(self, **kwargs: object) -> object:
-            assert kwargs["model"] == "gemini-embedding-2"
-            assert kwargs["config"].output_dimensionality == 768  # type: ignore[union-attr]
-            text = kwargs["contents"][0].parts[0].text  # type: ignore[index,union-attr]
-            assert text == "Represent this course passage for retrieval:\nWhat is a basis?"
-            return type("Response", (), {"embeddings": [type("Embedding", (), {"values": [0.1] * 768})()]})()
+def test_query_embedding_uses_voyage_query_mode_and_dimension() -> None:
+    def embedder(texts: list[str], api_key: str, *, input_type: str) -> list[list[float]]:
+        assert texts == ["What is a basis?"]
+        assert api_key == "v" * 32
+        assert input_type == "query"
+        return [[0.1] * 1024]
 
-    vector = embed_question("What is a basis?", "g" * 32, client=type("Client", (), {"models": Models()})())
-    assert len(vector) == 768
+    vector = embed_question("What is a basis?", "v" * 32, embedder=embedder)
+    assert len(vector) == 1024
 
 
 def test_query_embedding_rejects_invalid_dimension_without_provider_detail() -> None:
-    class Models:
-        def embed_content(self, **_kwargs: object) -> object:
-            return type("Response", (), {"embeddings": [type("Embedding", (), {"values": [1.0]})()]})()
-
-    client = type("Client", (), {"models": Models()})()
     with pytest.raises(AnsweringError, match="temporarily unavailable"):
-        embed_question("Question", "g" * 32, client=client)
+        embed_question(
+            "Question", "v" * 32,
+            embedder=lambda *_args, **_kwargs: [[1.0]],
+        )
 
 
 def test_query_embedding_rejects_zero_vector() -> None:
-    class Models:
-        def embed_content(self, **_kwargs: object) -> object:
-            return type("Response", (), {"embeddings": [type("Embedding", (), {"values": [0.0] * 768})()]})()
-
-    client = type("Client", (), {"models": Models()})()
     with pytest.raises(AnsweringError, match="temporarily unavailable"):
-        embed_question("Question", "g" * 32, client=client)
+        embed_question(
+            "Question", "v" * 32,
+            embedder=lambda *_args, **_kwargs: [[0.0] * 1024],
+        )
 
 
 def test_retrieval_uses_bounded_active_chunk_search() -> None:
@@ -64,13 +59,13 @@ def test_retrieval_uses_bounded_active_chunk_search() -> None:
 
     class Client:
         def rpc(self, name: str, args: dict[str, object]) -> Rpc:
-            assert name == "match_chunks"
-            assert len(args["query_embedding"]) == 768  # type: ignore[arg-type]
+            assert name == "match_chunks_voyage"
+            assert len(args["query_embedding"]) == 1024  # type: ignore[arg-type]
             assert args["match_count"] == 8
             assert args["min_similarity"] == 0.70
             return Rpc()
 
-    assert retrieve_evidence(Client(), [0.1] * 768) == [{"chunk_id": "c1"}]
+    assert retrieve_evidence(Client(), [0.1] * 1024) == [{"chunk_id": "c1"}]
 
 
 def test_retrieval_uses_study_scope_when_selected() -> None:
@@ -80,11 +75,11 @@ def test_retrieval_uses_study_scope_when_selected() -> None:
 
     class Client:
         def rpc(self, name: str, args: dict[str, object]) -> Rpc:
-            assert name == "match_chunks_by_scope"
+            assert name == "match_chunks_voyage_by_scope"
             assert args["study_scope"] == "mid_sem"
             return Rpc()
 
-    assert retrieve_evidence(Client(), [0.1] * 768, "mid_sem") == []
+    assert retrieve_evidence(Client(), [0.1] * 1024, "mid_sem") == []
 
 
 def test_answer_citations_are_mapped_only_from_retrieved_metadata() -> None:
@@ -160,10 +155,100 @@ def test_ai_star_provider_errors_are_redacted() -> None:
     assert "sensitive-provider-detail" not in str(error.value)
 
 
+def test_ai_star_uses_fallback_once_after_transient_failure() -> None:
+    models: list[str] = []
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return b'{"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}'
+
+    def opener(request: object, *, timeout: int) -> Response:
+        models.append(json.loads(request.data)["model"])  # type: ignore[attr-defined]
+        if len(models) == 1:
+            raise TimeoutError("primary busy")
+        return Response()
+
+    assert _call_ai_star("a" * 32, [], opener=opener) == "{}"
+    assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
+
+
+@pytest.mark.parametrize("status", [429, 503])
+def test_ai_star_uses_fallback_after_retryable_http_error(status: int) -> None:
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    models: list[str] = []
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return b'{"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}'
+
+    def opener(request: object, *, timeout: int) -> Response:
+        models.append(json.loads(request.data)["model"])  # type: ignore[attr-defined]
+        if len(models) == 1:
+            raise HTTPError(request.full_url, status, "provider busy", {}, BytesIO())  # type: ignore[attr-defined]
+        return Response()
+
+    assert _call_ai_star("a" * 32, [], opener=opener) == "{}"
+    assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
+
+
+def test_ai_star_does_not_fallback_after_non_retryable_http_error() -> None:
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    calls = 0
+
+    def opener(request: object, *, timeout: int) -> object:
+        nonlocal calls
+        calls += 1
+        raise HTTPError(request.full_url, 401, "secret provider detail", {}, BytesIO())  # type: ignore[attr-defined]
+
+    with pytest.raises(AnsweringError, match="temporarily unavailable") as error:
+        _call_ai_star("a" * 32, [], opener=opener)
+    assert calls == 1
+    assert "secret provider detail" not in str(error.value)
+
+
+def test_ai_star_does_not_fallback_after_invalid_response() -> None:
+    calls = 0
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return b"not json"
+
+    def opener(*_args: object, **_kwargs: object) -> Response:
+        nonlocal calls
+        calls += 1
+        return Response()
+
+    with pytest.raises(AnsweringError, match="temporarily unavailable"):
+        _call_ai_star("a" * 32, [], opener=opener)
+    assert calls == 1
+
+
 def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyPatch) -> None:
     import study_guide.answering as answering
 
-    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 768)
+    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 1024)
     evidence = [
         {
             "document_id": "d",
@@ -200,7 +285,7 @@ def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyP
 
     result = answer_question(
         "What is a basis?",
-        gemini_api_key="g" * 32,
+        voyage_api_key="v" * 32,
         ai_star_api_key="a" * 32,
         database_client=object(),
         user_key="repair-test-user",
@@ -228,11 +313,11 @@ def test_answer_question_refuses_without_generation_when_evidence_is_empty(
 ) -> None:
     import study_guide.answering as answering
 
-    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 768)
+    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 1024)
     monkeypatch.setattr(answering, "retrieve_evidence", lambda *_args: [])
     result = answer_question(
         "Question outside course material",
-        gemini_api_key="g" * 32,
+        voyage_api_key="v" * 32,
         ai_star_api_key="a" * 32,
         database_client=object(),
         user_key="empty-evidence-user",
@@ -245,12 +330,12 @@ def test_answer_question_refuses_without_generation_when_evidence_is_empty(
 def test_answer_question_rate_limits_by_user(monkeypatch: pytest.MonkeyPatch) -> None:
     import study_guide.answering as answering
 
-    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 768)
+    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 1024)
     monkeypatch.setattr(answering, "retrieve_evidence", lambda *_args: [])
     for _ in range(5):
         answer_question(
             "Question",
-            gemini_api_key="g" * 32,
+            voyage_api_key="v" * 32,
             ai_star_api_key="a" * 32,
             database_client=object(),
             user_key="rate-limit-test-user",
@@ -258,7 +343,7 @@ def test_answer_question_rate_limits_by_user(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(AnsweringError, match="wait a minute"):
         answer_question(
             "Question",
-            gemini_api_key="g" * 32,
+            voyage_api_key="v" * 32,
             ai_star_api_key="a" * 32,
             database_client=object(),
             user_key="rate-limit-test-user",
@@ -270,7 +355,7 @@ def test_answer_question_rejects_when_generation_is_at_capacity(
 ) -> None:
     import study_guide.answering as answering
 
-    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 768)
+    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 1024)
     monkeypatch.setattr(
         answering,
         "retrieve_evidence",
@@ -282,7 +367,7 @@ def test_answer_question_rejects_when_generation_is_at_capacity(
         with pytest.raises(AnsweringError, match="busy"):
             answer_question(
                 "Question",
-                gemini_api_key="g" * 32,
+                voyage_api_key="v" * 32,
                 ai_star_api_key="a" * 32,
                 database_client=object(),
                 user_key="busy-test-user",

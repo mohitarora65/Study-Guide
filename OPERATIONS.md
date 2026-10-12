@@ -10,7 +10,7 @@
 - Python: select 3.12 in Streamlit advanced settings.
 - Data: the existing Supabase project, using server-held service credentials.
 - Identity: the existing Google OAuth client with an exact deployed callback.
-- Retrieval: Google `gemini-embedding-2`, 768 dimensions.
+- Retrieval after migration 005 and re-index: Voyage `voyage-4-lite`, 1,024 dimensions. The legacy Gemini vector column is retained for rollback.
 - Generation: AI STAR `deepseek-v4-flash` at `https://ai.starimg.ru/v1`.
 
 The current project directory is untracked inside the broader `/Users/mohitarora` Git root. Do not deploy from or broadly stage that home-directory repository. Create or select a dedicated repository first; the user performs all Git operations.
@@ -47,8 +47,8 @@ user_key_secret = "<approved-strong-secret-at-least-32-characters>"
 url = "https://<project-ref>.supabase.co"
 service_role_key = "<server-only-service-role-key>"
 
-[gemini]
-api_key = "<gemini-api-key>"
+[voyage]
+api_key = "<voyage-api-key>"
 
 [ai_star]
 api_key = "<ai-star-api-key>"
@@ -92,7 +92,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Check Streamlit logs for safe error categories only; do not add full questions, answers, emails, tokens or course excerpts to logs.
 - Check Supabase project availability/storage and provider dashboards when answer or ingestion flows fail.
 - AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
-- Gemini embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
+- Voyage embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
 - Do not re-index or delete the ready course document as a health check.
 - Student quiz creation is local and does not consume provider balance.
 - V2.2's three approved synthetic generations reached the provider's output-length limit. V2.3's Rank set and V2.5's Eigenvalues set passed manual source review. V2.8's raw SVD diagnostic stopped normally at 4,761/5,000 completion tokens and passed structural validation, but V2.9's normal application path still truncated at 6,000. The runtime cap was restored to 5,000. This variability makes further cap increases a poor reliability strategy. Do not make another call, change reasoning behavior, switch providers/models or redesign the workflow without approval; authenticated quiz browser/accessibility checks remain not tested.
@@ -106,7 +106,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 |---|---|---|
 | App unavailable | Streamlit app status/logs and recent deployment | Reboot the app; if a release caused it, roll back to the last known-good commit/deployment. |
 | Login loop/failure | Final app URL, Streamlit `auth.redirect_uri`, Google authorized redirect URI | Make the URIs identical, including HTTPS and `/oauth2callback`; do not weaken domain checks. |
-| All questions fail before generation | Gemini quota/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
+| All questions fail before generation | Voyage allowance/rate limit/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
 | Generation fails | AI STAR balance/status/key | Keep safe error output; do not switch models/providers without a new approval. |
 | Quiz creation fails | Exact topic name and bank capacity for the mastery mix | Add source-checked bank content or deactivate the unsupported topic; do not save an attempt. |
 | Incorrect or missing citations | Retrieval/evaluation evidence and active document version | Pause pilot use if systemic; do not lower citation validation. |
@@ -124,10 +124,10 @@ Record date, tester role, result and evidence without recording secrets, identit
 
 ## Cost, privacy and capacity limits
 
-- Gemini embeddings are paid and metered; exact deployed cost is not available from the app.
+- Voyage embeddings are metered; the advertised free allowance is an external policy and exact deployed usage/cost is not available from the app.
 - AI STAR consumes the purchased balance with a user-reported ×0.1 multiplier and stop-at-zero behavior. Dollar pricing, expiry and storage/retention remain unverified.
-- Questions go to Gemini for embedding. Questions, bounded recent conversation and retrieved excerpts go to AI STAR for generation. Names, email addresses and identity tokens are not intentionally sent.
-- Starting a quiz sends no topic, course excerpt, identity or quiz content to Gemini or AI STAR.
+- Questions go to Voyage for embedding. Questions, bounded recent conversation and retrieved excerpts go to AI STAR for generation. Names, email addresses and identity tokens are not intentionally sent.
+- Starting a quiz sends no topic, course excerpt, identity or quiz content to Voyage or AI STAR.
 - Streamlit Community Cloud and Supabase free services have no class-wide uptime or concurrency guarantee.
 - The measured three-concurrent-request burst completed successfully, but it is not evidence for 120 simultaneous generations.
 

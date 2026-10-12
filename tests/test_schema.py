@@ -5,6 +5,7 @@ SCHEMA = Path("supabase/migrations/001_initial.sql").read_text()
 INGESTION_SCHEMA = Path("supabase/migrations/002_ingestion.sql").read_text()
 QUIZ_SCHEMA = Path("supabase/migrations/003_adaptive_quiz.sql").read_text()
 V3_SCHEMA = Path("supabase/migrations/004_study_modes_and_questions.sql").read_text()
+VOYAGE_SCHEMA = Path("supabase/migrations/005_voyage_embeddings.sql").read_text()
 
 
 def test_schema_contains_required_tables_and_vector_column() -> None:
@@ -94,3 +95,17 @@ def test_v3_schema_keeps_drafts_private_and_scopes_retrieval() -> None:
     assert "revoke all on table public.question_candidates from public, anon, authenticated" in V3_SCHEMA
     assert "function public.match_chunks_by_scope" in V3_SCHEMA
     assert "study_scope = any(d.study_scopes)" in V3_SCHEMA
+
+
+def test_voyage_schema_is_additive_private_and_1024_dimensional() -> None:
+    assert "alter column embedding drop not null" in VOYAGE_SCHEMA
+    assert "add column voyage_embedding extensions.vector(1024)" in VOYAGE_SCHEMA
+    assert "drop column embedding" not in VOYAGE_SCHEMA
+    assert "p_embedding_dimension not in (768, 1024)" in VOYAGE_SCHEMA
+    assert "security definer" in VOYAGE_SCHEMA
+    assert "set search_path = public, extensions" in VOYAGE_SCHEMA
+    assert "function public.match_chunks_voyage" in VOYAGE_SCHEMA
+    assert "function public.match_chunks_voyage_by_scope" in VOYAGE_SCHEMA
+    assert "c.voyage_embedding is not null" in VOYAGE_SCHEMA
+    assert VOYAGE_SCHEMA.count("from public, anon, authenticated") == 2
+    assert VOYAGE_SCHEMA.count("to service_role") == 2

@@ -19,8 +19,8 @@ The bundled bank contains 11 questions for each approved topic—four easy, four
 - Python 3.12 deployment target (the current local verification used Python 3.13)
 - A Google OAuth web client for the `iiti.ac.in` Workspace domain
 - A development Supabase project
-- A Gemini API key with access to `gemini-embedding-2`
-- An AI STAR API key for `deepseek-v4-flash` answer generation
+- A Voyage API key with access to `voyage-4-lite`
+- An AI STAR API key for `deepseek-v4-flash` answer generation, with `deepseek-v4.1-flash` as a transient-failure fallback
 
 ## Local Setup
 
@@ -41,7 +41,9 @@ http://localhost:8501/oauth2callback
 
 Generate separate strong random values for `cookie_secret` and `user_key_secret`. The Supabase service-role key is server-only and must never be exposed to browser code.
 
-Set the Gemini key only in the local `[gemini]` section and the AI STAR key only in `[ai_star]`. Both are used server-side and are never sent to Supabase or the browser. The AI STAR request contains the question, a bounded recent conversation and retrieved course excerpts; it does not contain the student's email or account identifier. The user accepts transmission although AI STAR storage/retention terms are unknown; the reported no-training claim is unverified. The gateway is reported to deduct 0.1 balance tokens per model token and stop requests at zero; dollar pricing/balance expiry are unknown.
+Set the Voyage key only in the local `[voyage]` section and the AI STAR key only in `[ai_star]`. Both are used server-side and are never sent to Supabase or the browser. Voyage receives course chunks during indexing and individual student search questions during retrieval; AI STAR receives the question, a bounded recent conversation and retrieved course excerpts. Neither request includes the student's email or account identifier. Provider retention and account terms must be reviewed by the operator.
+
+Study answers use `deepseek-v4-flash` first. A timeout, network failure, HTTP 429 or HTTP 5xx response triggers one attempt with `deepseek-v4.1-flash`; authentication, request-validation and malformed-output failures are not retried.
 
 Run the app:
 
@@ -83,8 +85,9 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 - Each upload is classified as Theory or Questions and tagged for one or more of Mid Sem, End Sem and Class Quiz. Overall is their union.
 - PDFs must be readable, unencrypted and text-based. OCR is not included.
 - SHA-256 duplicate detection prevents the same bytes from creating another document.
-- Text stays within its real 1-based PDF page and is split into chunks of up to 1,800 characters with up to 250 characters of overlap.
-- Embeddings use `gemini-embedding-2` at 768 dimensions through the official Google SDK; LangChain is intentionally not used.
+- Text stays within its real 1-based PDF page and is packed along paragraph, list and sentence boundaries into chunks of up to 2,400 characters. Complete trailing units provide up to 250 characters of overlap; oversized unbroken text uses a deterministic hard split.
+- Embeddings use `voyage-4-lite` with its native 1,024-dimensional float output and distinct `document`/`query` retrieval modes. The adapter uses the standard library with bounded responses, explicit timeouts and no hidden retries.
+- Migration `005_voyage_embeddings.sql` keeps the legacy 768-dimensional Gemini column for rollback and adds a separate Voyage column and private search functions. Existing documents must be re-indexed before Voyage retrieval can return them.
 - A replacement version becomes searchable only after every chunk is stored. Failed replacement attempts leave the earlier ready version active.
 - Delete first removes the document from retrieval, then removes the private object and derived database rows.
 - Admins explicitly extract question drafts. Question uploads are scanned broadly; Theory uploads are scanned only on pages with an explicit Questions/Exercises/Problems heading. Drafts are never student-visible until completed and approved.
@@ -109,7 +112,7 @@ Validate the approved dataset locally without provider calls:
 
 The TA-approved live set was run on 2026-10-09; four errors were retried individually. The merged results are saved at `evaluation/results/20261009T121507Z.json` (ignored by Git), and the TA-reviewed results are at `evaluation/results/20261009T122132Z-ta-reviewed.json` (also ignored by Git). The reviewed set has 40 rows with no provider errors; validity among 46 citations, citation support, refusal recall and high-risk formula review all pass. One supported question (A09) was refused despite retrieval finding its definition on page 25; the user accepted this as a known limitation.
 
-To repeat the full live test set, use configured Gemini, AI STAR and development Supabase credentials:
+To repeat the full live test set after the Voyage cutover, use configured Voyage, AI STAR and development Supabase credentials:
 
 ```bash
 .venv/bin/python evaluation/run_evaluation.py --live

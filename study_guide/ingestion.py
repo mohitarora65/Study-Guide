@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import math
+import re
 import time
 from dataclasses import dataclass
 from io import BytesIO
@@ -9,20 +9,23 @@ from pathlib import PurePosixPath
 from typing import Any, Callable
 from uuid import uuid4
 
-from google import genai
-from google.genai import types
 from pypdf import PdfReader
 
 from study_guide import database
+from study_guide.embeddings import (
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+    EmbeddingProviderError,
+    InvalidEmbeddingResponse,
+    embed_texts,
+)
 from study_guide.study_modes import validate_material_type, validate_study_scopes
 
 
 MAX_PDF_BYTES = 25 * 1024 * 1024
 LOW_TEXT_CHAR_LIMIT = 100
-CHUNK_CHARS = 1_800
+CHUNK_CHARS = 2_400
 CHUNK_OVERLAP = 250
-EMBEDDING_MODEL = "gemini-embedding-2"
-EMBEDDING_DIMENSION = 768
 EMBEDDING_BATCH_SIZE = 32
 
 
@@ -83,23 +86,53 @@ def _safe_display_name(filename: str) -> str:
 
 
 def _chunks_for_page(page_number: int, text: str) -> list[Chunk]:
-    chunks: list[Chunk] = []
-    start = 0
-    while start < len(text):
-        content = text[start : start + CHUNK_CHARS].strip()
-        if content:
-            chunks.append(
-                Chunk(
-                    page_number=page_number,
-                    chunk_order=len(chunks),
-                    content=content,
-                    content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                )
-            )
-        if start + CHUNK_CHARS >= len(text):
-            break
-        start += CHUNK_CHARS - CHUNK_OVERLAP
-    return chunks
+    units = [
+        unit.strip()
+        for unit in re.split(
+            r"\n\s*\n+|\n(?=\s*(?:[-*•]|\d+[.)])\s)|(?<=[.!?])\s+(?=\S)",
+            text,
+        )
+        if unit.strip()
+    ]
+    bounded_units = [
+        (unit[start : start + CHUNK_CHARS], len(unit) <= CHUNK_CHARS)
+        for unit in units
+        for start in range(0, len(unit), CHUNK_CHARS)
+    ]
+    contents: list[str] = []
+    current: list[tuple[str, bool]] = []
+
+    for unit, complete in bounded_units:
+        if current and len(
+            " ".join([text for text, _ in current] + [unit])
+        ) > CHUNK_CHARS:
+            contents.append(" ".join(text for text, _ in current))
+            overlap: list[tuple[str, bool]] = []
+            for trailing in reversed(current):
+                if not trailing[1] or len(
+                    " ".join([trailing[0]] + [text for text, _ in overlap])
+                ) > CHUNK_OVERLAP:
+                    break
+                overlap.insert(0, trailing)
+            current = overlap
+            if current and len(
+                " ".join([text for text, _ in current] + [unit])
+            ) > CHUNK_CHARS:
+                current = []
+        current.append((unit, complete))
+
+    if current:
+        contents.append(" ".join(text for text, _ in current))
+
+    return [
+        Chunk(
+            page_number=page_number,
+            chunk_order=chunk_order,
+            content=content,
+            content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        )
+        for chunk_order, content in enumerate(contents)
+    ]
 
 
 def prepare_pdf(filename: str, mime_type: str | None, data: bytes) -> PreparedDocument:
@@ -160,12 +193,8 @@ def prepare_pdf(filename: str, mime_type: str | None, data: bytes) -> PreparedDo
 
 
 def _is_transient(exc: Exception) -> bool:
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    try:
-        status = int(status)
-    except (TypeError, ValueError):
-        pass
-    return isinstance(exc, (TimeoutError, ConnectionError)) or status in {
+    status = getattr(exc, "status_code", None)
+    return status is None or status in {
         429,
         500,
         502,
@@ -178,59 +207,39 @@ def embed_chunks(
     chunks: tuple[Chunk, ...],
     api_key: str,
     *,
-    client: Any | None = None,
+    embedder: Callable[..., list[list[float]]] = embed_texts,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[list[float]]:
     if not api_key:
-        raise IngestionError("GEMINI_NOT_CONFIGURED", "Gemini is not configured yet.")
-    client = client or genai.Client(api_key=api_key)
+        raise IngestionError("VOYAGE_NOT_CONFIGURED", "Voyage is not configured yet.")
     vectors: list[list[float]] = []
 
     for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
         batch = chunks[offset : offset + EMBEDDING_BATCH_SIZE]
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(
-                        text="Represent this course passage for retrieval:\n" + chunk.content
-                    )
-                ],
-            )
-            for chunk in batch
-        ]
         for attempt in range(2):
             try:
-                response = client.models.embed_content(
-                    model=EMBEDDING_MODEL,
-                    contents=contents,
-                    config=types.EmbedContentConfig(
-                        output_dimensionality=EMBEDDING_DIMENSION
-                    ),
-                )
-                embeddings = response.embeddings or []
-                if len(embeddings) != len(batch):
-                    raise IngestionError(
-                        "INVALID_EMBEDDING_RESPONSE",
-                        "The embedding provider returned an invalid response.",
+                vectors.extend(
+                    embedder(
+                        [chunk.content for chunk in batch],
+                        api_key,
+                        input_type="document",
                     )
-                for embedding in embeddings:
-                    values = list(embedding.values or [])
-                    if len(values) != EMBEDDING_DIMENSION or not all(
-                        math.isfinite(value) for value in values
-                    ):
-                        raise IngestionError(
-                            "INVALID_EMBEDDING_RESPONSE",
-                            "The embedding provider returned an invalid response.",
-                        )
-                    vectors.append(values)
+                )
                 break
-            except IngestionError:
-                raise
-            except Exception as exc:
+            except InvalidEmbeddingResponse as exc:
+                raise IngestionError(
+                    "INVALID_EMBEDDING_RESPONSE",
+                    "The embedding provider returned an invalid response.",
+                ) from exc
+            except EmbeddingProviderError as exc:
                 if attempt == 0 and _is_transient(exc):
                     sleep(1)
                     continue
+                if exc.status_code == 429:
+                    raise IngestionError(
+                        "EMBEDDING_QUOTA_EXCEEDED",
+                        "Voyage embedding allowance or rate limit was exceeded. Retry later or check the account.",
+                    ) from exc
                 raise IngestionError(
                     "EMBEDDING_FAILED", "The document could not be embedded. Try again."
                 ) from exc
@@ -261,7 +270,7 @@ def _finish_ingestion(
                     "chunk_order": chunk.chunk_order,
                     "content": chunk.content,
                     "content_hash": chunk.content_hash,
-                    "embedding": vector,
+                    "voyage_embedding": vector,
                 }
                 for chunk, vector in zip(prepared.chunks, vectors, strict=True)
             ],
@@ -378,16 +387,8 @@ def retry_failed_document(
     *,
     progress: Callable[[str], None] = lambda _message: None,
 ) -> IngestionOutcome:
-    document = database.get_document(client, document_id)
-    progress("Loading the private source PDF")
-    data = database.download_pdf(client, document["object_path"])
-    prepared = prepare_pdf(document["display_name"], "application/pdf", data)
-    if prepared.content_hash != document["content_hash"]:
-        raise IngestionError("SOURCE_CHANGED", "The stored source PDF failed validation.")
-    version_id, run_id = database.get_failed_attempt(client, document_id)
-    return _finish_ingestion(
-        client, prepared, api_key, document_id, version_id, run_id, progress
-    )
+    # A retry gets current provider metadata instead of reviving an incompatible failed version.
+    return reindex_document(client, api_key, document_id, progress=progress)
 
 
 def reindex_document(

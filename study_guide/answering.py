@@ -10,12 +10,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from google import genai
-from google.genai import types
-
 from study_guide import database
 from study_guide.database import DatabaseError
-from study_guide.ingestion import EMBEDDING_DIMENSION, EMBEDDING_MODEL
+from study_guide.embeddings import (
+    EMBEDDING_DIMENSION,
+    EmbeddingProviderError,
+    embed_texts,
+)
 
 
 MAX_QUESTION_CHARS = 1_000
@@ -24,6 +25,7 @@ RETRIEVAL_COUNT = 8
 MIN_SIMILARITY = 0.70
 AI_STAR_BASE_URL = "https://ai.starimg.ru/v1"
 AI_STAR_MODEL = "deepseek-v4-flash"
+AI_STAR_FALLBACK_MODEL = "deepseek-v4.1-flash"
 MAX_CONTEXT_CHARS = 12_000
 MAX_HISTORY_CHARS = 4_000
 MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
@@ -59,29 +61,13 @@ def validate_question(question: str) -> str:
 
 
 def embed_question(
-    question: str, api_key: str, *, client: Any | None = None
+    question: str, api_key: str, *, embedder: Any = embed_texts
 ) -> list[float]:
     question = validate_question(question)
     if not api_key:
         raise AnsweringError("Question search is not configured yet.")
-    client = client or genai.Client(api_key=api_key)
     try:
-        response = client.models.embed_content(
-            model=EMBEDDING_MODEL,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(
-                            text="Represent this course passage for retrieval:\n" + question
-                        )
-                    ],
-                )
-            ],
-            config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSION),
-        )
-        embeddings = response.embeddings or []
-        values = list(embeddings[0].values or []) if len(embeddings) == 1 else []
+        values = embedder([question], api_key, input_type="query")[0]
         if (
             len(values) != EMBEDDING_DIMENSION
             or not all(math.isfinite(value) for value in values)
@@ -89,7 +75,7 @@ def embed_question(
         ):
             raise ValueError("invalid embedding")
         return values
-    except Exception as exc:
+    except (EmbeddingProviderError, IndexError, TypeError, ValueError) as exc:
         raise AnsweringError("Question search is temporarily unavailable.") from exc
 
 
@@ -129,44 +115,56 @@ def _check_rate_limit(user_key: str) -> None:
 def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any = None) -> str:
     if not api_key:
         raise AnsweringError("Answer generation is not configured yet.")
-    request = Request(
-        f"{AI_STAR_BASE_URL}/chat/completions",
-        data=json.dumps(
-            {
-                "model": AI_STAR_MODEL,
-                "messages": messages,
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-            }
-        ).encode(),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with (opener or urlopen)(request, timeout=30) as response:
-            raw = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
-        if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
-            raise ValueError("response too large")
-        payload = json.loads(raw)
-        choice = payload["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise ValueError("response truncated")
-        content = choice["message"].get("content")
-        if not isinstance(content, str) or not content:
-            raise ValueError("response content missing")
-        return content
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
-        raise AnsweringError("Answer generation is temporarily unavailable.") from exc
+    models = (AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL)
+    for index, model in enumerate(models):
+        request = Request(
+            f"{AI_STAR_BASE_URL}/chat/completions",
+            data=json.dumps(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                    "max_tokens": MAX_OUTPUT_TOKENS,
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with (opener or urlopen)(request, timeout=30) as response:
+                raw = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
+        except HTTPError as exc:
+            if index == 0 and (exc.code == 429 or 500 <= exc.code < 600):
+                continue
+            raise AnsweringError("Answer generation is temporarily unavailable.") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            if index == 0:
+                continue
+            raise AnsweringError("Answer generation is temporarily unavailable.") from exc
+        try:
+            if len(raw) > MAX_PROVIDER_RESPONSE_BYTES:
+                raise ValueError("response too large")
+            payload = json.loads(raw)
+            choice = payload["choices"][0]
+            if choice.get("finish_reason") == "length":
+                raise ValueError("response truncated")
+            content = choice["message"].get("content")
+            if not isinstance(content, str) or not content:
+                raise ValueError("response content missing")
+            return content
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise AnsweringError("Answer generation is temporarily unavailable.") from exc
+    raise AnsweringError("Answer generation is temporarily unavailable.")
 
 
 def answer_question(
     question: str,
     *,
-    gemini_api_key: str | None,
+    voyage_api_key: str | None,
     ai_star_api_key: str | None,
     database_client: Any,
     user_key: str,
@@ -175,14 +173,14 @@ def answer_question(
     study_scope: str | None = None,
 ) -> ValidatedAnswer:
     question = validate_question(question)
-    if not gemini_api_key or not ai_star_api_key:
+    if not voyage_api_key or not ai_star_api_key:
         raise AnsweringError("Question answering is not configured yet.")
     if not user_key:
         raise AnsweringError("Question answering is unavailable.")
     _check_rate_limit(user_key)
 
     evidence = retrieve_evidence(
-        database_client, embed_question(question, gemini_api_key), study_scope
+        database_client, embed_question(question, voyage_api_key), study_scope
     )
     if not evidence:
         return ValidatedAnswer(INSUFFICIENT_MATERIAL, ())

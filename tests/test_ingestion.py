@@ -1,9 +1,8 @@
-from types import SimpleNamespace
-
 import pytest
 
 import study_guide.ingestion as ingestion
 from study_guide import database
+from study_guide.embeddings import EmbeddingProviderError, InvalidEmbeddingResponse
 from study_guide.ingestion import (
     Chunk,
     ExtractedPage,
@@ -30,7 +29,7 @@ class Reader:
     def __init__(self, _stream: object, *, strict: bool) -> None:
         assert strict is False
         self.is_encrypted = False
-        self.pages = [Page("a" * 2_000), Page("short")]
+        self.pages = [Page("a" * 3_000), Page("short")]
 
 
 def test_prepares_page_bounded_chunks_and_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -44,8 +43,41 @@ def test_prepares_page_bounded_chunks_and_warnings(monkeypatch: pytest.MonkeyPat
     assert [chunk.page_number for chunk in prepared.chunks] == [1, 1, 2]
     assert [chunk.chunk_order for chunk in prepared.chunks] == [0, 1, 0]
     assert all(len(chunk.content) <= ingestion.CHUNK_CHARS for chunk in prepared.chunks)
-    assert prepared.chunks[0].content[-ingestion.CHUNK_OVERLAP :] == prepared.chunks[1].content[: ingestion.CHUNK_OVERLAP]
+    assert "".join(chunk.content for chunk in prepared.chunks[:2]) == "a" * 3_000
     assert len(prepared.content_hash) == 64
+
+
+def test_structural_chunks_preserve_complete_sentence_overlap() -> None:
+    sentences = [f"Sentence {index} " + "x" * 90 + "." for index in range(30)]
+
+    chunks = ingestion._chunks_for_page(7, " ".join(sentences))
+
+    assert len(chunks) == 2
+    assert all(chunk.page_number == 7 for chunk in chunks)
+    assert all(len(chunk.content) <= ingestion.CHUNK_CHARS for chunk in chunks)
+    assert chunks[0].content.endswith(".")
+    assert chunks[1].content.endswith(".")
+    overlap_length = max(
+        length
+        for length in range(1, ingestion.CHUNK_OVERLAP + 1)
+        if chunks[0].content.endswith(chunks[1].content[:length])
+    )
+    overlap = chunks[1].content[:overlap_length]
+    assert overlap.startswith("Sentence")
+    assert overlap.endswith(".")
+
+
+def test_structural_chunks_hard_split_oversized_unbroken_text() -> None:
+    text = "x" * (ingestion.CHUNK_CHARS * 2 + 5)
+
+    chunks = ingestion._chunks_for_page(1, text)
+
+    assert [len(chunk.content) for chunk in chunks] == [
+        ingestion.CHUNK_CHARS,
+        ingestion.CHUNK_CHARS,
+        5,
+    ]
+    assert "".join(chunk.content for chunk in chunks) == text
 
 
 @pytest.mark.parametrize(
@@ -93,57 +125,89 @@ def _chunk(text: str = "course text") -> Chunk:
 
 
 def test_embeds_in_fixed_batches_and_dimension() -> None:
-    calls: list[dict[str, object]] = []
+    calls: list[tuple[list[str], str, str]] = []
 
-    class Models:
-        def embed_content(self, **kwargs: object) -> object:
-            calls.append(kwargs)
-            contents = kwargs["contents"]
-            return SimpleNamespace(
-                embeddings=[SimpleNamespace(values=[0.1] * 768) for _ in contents]  # type: ignore[arg-type]
-            )
+    def embedder(
+        texts: list[str], api_key: str, *, input_type: str
+    ) -> list[list[float]]:
+        calls.append((texts, api_key, input_type))
+        return [[0.1] * 1024 for _ in texts]
 
     vectors = embed_chunks(
         tuple(_chunk(str(index)) for index in range(33)),
         "key",
-        client=SimpleNamespace(models=Models()),
+        embedder=embedder,
     )
 
     assert len(calls) == 2
-    assert calls[0]["model"] == "gemini-embedding-2"
-    assert calls[0]["config"].output_dimensionality == 768  # type: ignore[union-attr]
+    assert calls[0][1:] == ("key", "document")
+    assert len(vectors[0]) == 1024
     assert len(vectors) == 33
 
 
 def test_retries_one_transient_embedding_failure() -> None:
     attempts = 0
 
-    class Models:
-        def embed_content(self, **_kwargs: object) -> object:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise TimeoutError("provider detail")
-            return SimpleNamespace(embeddings=[SimpleNamespace(values=[0.1] * 768)])
+    def embedder(*_args: object, **_kwargs: object) -> list[list[float]]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise EmbeddingProviderError()
+        return [[0.1] * 1024]
 
     assert len(
         embed_chunks(
             (_chunk(),),
             "key",
-            client=SimpleNamespace(models=Models()),
+            embedder=embedder,
             sleep=lambda _seconds: None,
         )
     ) == 1
     assert attempts == 2
 
 
+def test_reports_exhausted_embedding_quota_after_retry() -> None:
+    attempts = 0
+
+    def embedder(*_args: object, **_kwargs: object) -> list[list[float]]:
+        nonlocal attempts
+        attempts += 1
+        raise EmbeddingProviderError(status_code=429)
+
+    with pytest.raises(IngestionError) as error:
+        embed_chunks(
+            (_chunk(),),
+            "key",
+            embedder=embedder,
+            sleep=lambda _seconds: None,
+        )
+
+    assert attempts == 2
+    assert error.value.code == "EMBEDDING_QUOTA_EXCEEDED"
+    assert "private provider detail" not in str(error.value)
+
+
+def test_does_not_retry_non_transient_embedding_failure() -> None:
+    attempts = 0
+
+    def embedder(*_args: object, **_kwargs: object) -> list[list[float]]:
+        nonlocal attempts
+        attempts += 1
+        raise EmbeddingProviderError(status_code=401)
+
+    with pytest.raises(IngestionError) as error:
+        embed_chunks((_chunk(),), "key", embedder=embedder)
+
+    assert attempts == 1
+    assert error.value.code == "EMBEDDING_FAILED"
+
+
 def test_invalid_embedding_dimension_fails_safely() -> None:
-    class Models:
-        def embed_content(self, **_kwargs: object) -> object:
-            return SimpleNamespace(embeddings=[SimpleNamespace(values=[1.0])])
+    def embedder(*_args: object, **_kwargs: object) -> list[list[float]]:
+        raise InvalidEmbeddingResponse()
 
     with pytest.raises(IngestionError, match="invalid response") as error:
-        embed_chunks((_chunk(),), "key", client=SimpleNamespace(models=Models()))
+        embed_chunks((_chunk(),), "key", embedder=embedder)
     assert str(error.value) == "The embedding provider returned an invalid response."
 
 
@@ -180,16 +244,19 @@ def test_completed_ingestion_activates_only_after_chunks_are_stored(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
+    stored: dict[str, object] = {}
     monkeypatch.setattr(ingestion, "prepare_pdf", lambda *_args: _prepared())
     monkeypatch.setattr(database, "find_document_by_hash", lambda *_args: None)
     monkeypatch.setattr(database, "upload_pdf", lambda *_args: events.append("upload"))
     monkeypatch.setattr(
         database, "create_document_records", lambda *_args, **_kwargs: events.append("records")
     )
-    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 768])
-    monkeypatch.setattr(
-        database, "insert_chunks", lambda *_args: events.append("chunks")
-    )
+    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 1024])
+    def insert_chunks(_client: object, rows: list[dict[str, object]]) -> None:
+        stored["rows"] = rows
+        events.append("chunks")
+
+    monkeypatch.setattr(database, "insert_chunks", insert_chunks)
     monkeypatch.setattr(
         database, "activate_version", lambda *_args: events.append("activate")
     )
@@ -198,6 +265,10 @@ def test_completed_ingestion_activates_only_after_chunks_are_stored(
 
     assert result.chunk_count == 1
     assert events == ["upload", "records", "chunks", "activate"]
+    rows = stored["rows"]
+    assert isinstance(rows, list)
+    assert len(rows[0]["voyage_embedding"]) == 1024  # type: ignore[arg-type,index]
+    assert "embedding" not in rows[0]
 
 
 def test_ingestion_persists_material_classification(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,7 +312,7 @@ def test_failed_ingestion_records_safe_failure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(database, "find_document_by_hash", lambda *_args: None)
     monkeypatch.setattr(database, "upload_pdf", lambda *_args: None)
     monkeypatch.setattr(database, "create_document_records", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 768])
+    monkeypatch.setattr(ingestion, "embed_chunks", lambda *_args: [[0.1] * 1024])
     monkeypatch.setattr(
         database,
         "insert_chunks",
@@ -279,32 +350,23 @@ def test_delete_makes_document_unavailable_before_storage_cleanup(
     assert events == ["unavailable", "storage", "record"]
 
 
-def test_retry_reuses_failed_version_and_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = object()
-    document = {
-        "display_name": "notes.pdf",
-        "object_path": "private/notes.pdf",
-        "content_hash": "a" * 64,
-    }
-    monkeypatch.setattr(database, "get_document", lambda *_args: document)
-    monkeypatch.setattr(database, "download_pdf", lambda *_args: b"stored")
-    monkeypatch.setattr(ingestion, "prepare_pdf", lambda *_args: _prepared())
-    monkeypatch.setattr(
-        database, "get_failed_attempt", lambda *_args: ("failed-version", "failed-run")
-    )
-    finished: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        ingestion,
-        "_finish_ingestion",
-        lambda _client, _prepared_doc, _key, _document, version, run, _progress: (
-            finished.append((version, run))
-            or ingestion.IngestionOutcome("document", "notes.pdf", 1)
-        ),
-    )
+def test_retry_creates_a_current_provider_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
 
-    retry_failed_document(client, "key", "document")
+    def reindex(
+        client: object, api_key: str, document_id: str, *, progress: object
+    ) -> ingestion.IngestionOutcome:
+        captured.update(client=client, api_key=api_key, document_id=document_id, progress=progress)
+        return ingestion.IngestionOutcome(document_id, "notes.pdf", 1)
 
-    assert finished == [("failed-version", "failed-run")]
+    monkeypatch.setattr(ingestion, "reindex_document", reindex)
+    progress = lambda _message: None
+
+    result = retry_failed_document(object(), "key", "document", progress=progress)
+
+    assert result.document_id == "document"
+    assert captured["api_key"] == "key"
+    assert captured["progress"] is progress
 
 
 def test_reindex_creates_one_new_version_before_processing(

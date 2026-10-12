@@ -223,7 +223,7 @@ def main() -> int:
 
     try:
         settings = _load_settings()
-        if not settings.gemini_api_key or not settings.ai_star_api_key:
+        if not settings.voyage_api_key or not settings.ai_star_api_key:
             raise ValueError
         client = build_client(settings)
         documents = list_documents(client)
@@ -241,7 +241,7 @@ def main() -> int:
         items,
         lambda question: answer_question(
             question,
-            gemini_api_key=settings.gemini_api_key,
+            voyage_api_key=settings.voyage_api_key,
             ai_star_api_key=settings.ai_star_api_key,
             database_client=client,
             user_key="v1.4-evaluation",

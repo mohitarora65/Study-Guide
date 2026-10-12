@@ -33,27 +33,27 @@ def test_loads_valid_settings() -> None:
 
     assert settings.allowed_domain == "iiti.ac.in"
     assert settings.admin_emails == frozenset({"admin@iiti.ac.in"})
-    assert settings.gemini_api_key is None
+    assert settings.voyage_api_key is None
     assert settings.ai_star_api_key is None
     assert "admin@iiti.ac.in" not in repr(settings)
     assert "ssss" not in repr(settings)
 
 
-def test_loads_optional_gemini_key_without_exposing_it() -> None:
+def test_loads_optional_voyage_key_without_exposing_it() -> None:
     secrets = valid_secrets()
-    secrets["gemini"] = {"api_key": "g" * 32}
+    secrets["voyage"] = {"api_key": "v" * 32}
 
     settings = load_settings(secrets)
 
-    assert settings.gemini_api_key == "g" * 32
-    assert "gggg" not in repr(settings)
+    assert settings.voyage_api_key == "v" * 32
+    assert "vvvv" not in repr(settings)
 
 
-def test_short_gemini_key_is_rejected() -> None:
+def test_short_voyage_key_is_rejected() -> None:
     secrets = valid_secrets()
-    secrets["gemini"] = {"api_key": "short"}
+    secrets["voyage"] = {"api_key": "short"}
 
-    with pytest.raises(ConfigurationError, match="gemini.api_key is too short"):
+    with pytest.raises(ConfigurationError, match="voyage.api_key is too short"):
         load_settings(secrets)
 
 

@@ -74,7 +74,7 @@ def main() -> None:
             quiz = generate_quiz(
                 topic,
                 mastery_before=mastery,
-                gemini_api_key=settings.gemini_api_key,
+                voyage_api_key=settings.voyage_api_key,
                 ai_star_api_key=settings.ai_star_api_key,
                 database_client=client,
                 user_key=f"synthetic-v22-eval-{label}-20261010",

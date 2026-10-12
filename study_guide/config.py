@@ -20,7 +20,7 @@ class Settings:
     user_key_secret: str = field(repr=False)
     supabase_url: str
     supabase_service_role_key: str = field(repr=False)
-    gemini_api_key: str | None = field(default=None, repr=False)
+    voyage_api_key: str | None = field(default=None, repr=False)
     ai_star_api_key: str | None = field(default=None, repr=False)
 
 
@@ -103,16 +103,16 @@ def load_settings(secrets: Mapping[str, object]) -> Settings:
     if len(service_role_key) < 20:
         raise ConfigurationError("supabase.service_role_key is too short")
 
-    gemini = secrets.get("gemini", {})
-    if not isinstance(gemini, Mapping):
-        raise ConfigurationError("Configuration section must be a mapping: gemini")
-    gemini_api_key = gemini.get("api_key")
-    if gemini_api_key in (None, ""):
-        gemini_api_key = None
-    elif not isinstance(gemini_api_key, str) or gemini_api_key != gemini_api_key.strip():
-        raise ConfigurationError("Invalid configuration: gemini.api_key")
-    elif len(gemini_api_key) < 20:
-        raise ConfigurationError("gemini.api_key is too short")
+    voyage = secrets.get("voyage", {})
+    if not isinstance(voyage, Mapping):
+        raise ConfigurationError("Configuration section must be a mapping: voyage")
+    voyage_api_key = voyage.get("api_key")
+    if voyage_api_key in (None, ""):
+        voyage_api_key = None
+    elif not isinstance(voyage_api_key, str) or voyage_api_key != voyage_api_key.strip():
+        raise ConfigurationError("Invalid configuration: voyage.api_key")
+    elif len(voyage_api_key) < 20:
+        raise ConfigurationError("voyage.api_key is too short")
 
     ai_star = secrets.get("ai_star", {})
     if not isinstance(ai_star, Mapping):
@@ -131,6 +131,6 @@ def load_settings(secrets: Mapping[str, object]) -> Settings:
         user_key_secret=user_key_secret,
         supabase_url=supabase_url,
         supabase_service_role_key=service_role_key,
-        gemini_api_key=gemini_api_key,
+        voyage_api_key=voyage_api_key,
         ai_star_api_key=ai_star_api_key,
     )

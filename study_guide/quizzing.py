@@ -415,7 +415,7 @@ def generate_quiz(
     topic: str,
     *,
     mastery_before: int | None,
-    gemini_api_key: str | None,
+    voyage_api_key: str | None,
     ai_star_api_key: str | None,
     database_client: Any,
     user_key: str,
@@ -423,7 +423,7 @@ def generate_quiz(
     retrieve: Callable[[str], list[dict[str, Any]]] | None = None,
 ) -> GeneratedQuiz:
     topic = validate_topic_name(topic)
-    if not gemini_api_key or not ai_star_api_key:
+    if not voyage_api_key or not ai_star_api_key:
         raise QuizError("Quiz generation is not configured yet.")
     _check_quiz_rate_limit(user_key)
     mix = difficulty_mix(mastery_before)
@@ -432,7 +432,7 @@ def generate_quiz(
             database_client,
             embed_question(
                 "Create a course quiz about: " + selected_topic,
-                gemini_api_key,
+                voyage_api_key,
             ),
         )
     )

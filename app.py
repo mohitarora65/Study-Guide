@@ -106,7 +106,7 @@ def render_account_controls(identity: Identity) -> None:
 
 def render_study_page(settings: Settings, identity: Identity) -> None:
     st.title("Let’s resolve your doubt")
-    answering_enabled = bool(settings.gemini_api_key and settings.ai_star_api_key)
+    answering_enabled = bool(settings.voyage_api_key and settings.ai_star_api_key)
     if not answering_enabled:
         st.info("Question answering is not configured yet. Your saved chats remain private and available below.")
     client = build_client(settings)
@@ -199,7 +199,7 @@ def render_study_page(settings: Settings, identity: Identity) -> None:
             with st.spinner("Searching course material and preparing a cited answer…"):
                 answer = answer_question(
                     question,
-                    gemini_api_key=settings.gemini_api_key,
+                    voyage_api_key=settings.voyage_api_key,
                     ai_star_api_key=settings.ai_star_api_key,
                     database_client=client,
                     user_key=identity.user_key,
@@ -574,9 +574,9 @@ def render_documents_page(settings: Settings) -> None:
     if flash:
         (st.info if flash[0] == "info" else st.success)(flash[1])
 
-    if not settings.gemini_api_key:
+    if not settings.voyage_api_key:
         st.warning(
-            "Gemini is not configured. Add `gemini.api_key` to the local secrets file "
+            "Voyage is not configured. Add `voyage.api_key` to the local secrets file "
             "to upload, retry or re-index documents."
         )
 
@@ -601,13 +601,13 @@ def render_documents_page(settings: Settings) -> None:
     if st.button(
         "Upload and index",
         type="primary",
-        disabled=uploaded is None or settings.gemini_api_key is None or not study_scopes,
+        disabled=uploaded is None or settings.voyage_api_key is None or not study_scopes,
     ):
         try:
             with st.status("Indexing PDF", expanded=True) as status:
                 outcome = ingest_pdf(
                     client,
-                    settings.gemini_api_key or "",
+                    settings.voyage_api_key or "",
                     uploaded.name,
                     uploaded.type,
                     uploaded.getvalue(),
@@ -645,6 +645,7 @@ def render_documents_page(settings: Settings) -> None:
 
     error_messages = {
         "EMBEDDING_FAILED": "Embedding failed. Retry when the provider is available.",
+        "EMBEDDING_QUOTA_EXCEEDED": "Voyage embedding allowance or rate limit was exceeded. Retry later or check the account.",
         "INVALID_EMBEDDING_RESPONSE": "The embedding response was invalid. Retry later.",
         "INGESTION_FAILED": "Indexing failed. Retry this document.",
     }
@@ -708,13 +709,13 @@ def render_documents_page(settings: Settings) -> None:
                 if first.button(
                     "Retry indexing",
                     key=f"retry-{document['id']}",
-                    disabled=settings.gemini_api_key is None,
+                    disabled=settings.voyage_api_key is None,
                 ):
                     try:
                         with st.status("Retrying PDF", expanded=True) as status:
                             retry_failed_document(
                                 client,
-                                settings.gemini_api_key or "",
+                                settings.voyage_api_key or "",
                                 document["id"],
                                 progress=status.write,
                             )
@@ -730,13 +731,13 @@ def render_documents_page(settings: Settings) -> None:
                 if first.button(
                     "Re-index",
                     key=f"reindex-{document['id']}",
-                    disabled=settings.gemini_api_key is None,
+                    disabled=settings.voyage_api_key is None,
                 ):
                     try:
                         with st.status("Re-indexing PDF", expanded=True) as status:
                             reindex_document(
                                 client,
-                                settings.gemini_api_key or "",
+                                settings.voyage_api_key or "",
                                 document["id"],
                                 progress=status.write,
                             )
