@@ -1,7 +1,7 @@
 # Operations — Grounded Mathematics Study Guide
 
-**Status:** V1.5 deployment readiness plus a locally complete V2 question-bank redesign. V2 deployment remains blocked on teaching-assistant review of the full bank, authenticated quiz/browser evidence and the user-controlled release checkpoint. See `DEPLOYMENT_PLAN_V2.md`.
-**Last updated:** 2026-10-10
+**Status:** V3 and the Voyage migration are deployed. The active document was successfully re-indexed with Voyage on 2026-10-12; retrieval/citation verification remains pending.
+**Last updated:** 2026-10-12
 
 ## Deployment target
 
@@ -11,9 +11,9 @@
 - Data: the existing Supabase project, using server-held service credentials.
 - Identity: the existing Google OAuth client with an exact deployed callback.
 - Retrieval after migration 005 and re-index: Voyage `voyage-4-lite`, 1,024 dimensions. The legacy Gemini vector column is retained for rollback.
-- Generation: AI STAR `deepseek-v4-flash` at `https://ai.starimg.ru/v1`.
+- Generation: AI STAR `deepseek-v4-flash` at `https://ai.starimg.ru/v1`, with one `deepseek-v4.1-flash` attempt after a timeout, network failure, HTTP 429 or HTTP 5xx response.
 
-The current project directory is untracked inside the broader `/Users/mohitarora` Git root. Do not deploy from or broadly stage that home-directory repository. Create or select a dedicated repository first; the user performs all Git operations.
+The project has a dedicated Git repository. The user performs all Git mutations and should still review the exact project-scoped staged diff before pushing.
 
 ## Repository boundary
 
@@ -77,7 +77,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 1. Public URL returns the signed-out page over HTTPS.
 2. An authorized `iiti.ac.in` account signs in and out.
 3. Exact-domain rejection remains covered by automated tests; use a real wrong-domain account only if the user authorizes that account for testing.
-4. Admin sees Documents and the ready PDF metadata; no upload, re-index or delete is needed for release smoke testing.
+4. Admin sees Documents and the ready PDF metadata. Do not upload, re-index or delete content during an ordinary release smoke test.
 5. Student Study page renders and an approved synthetic supported question returns a validated page citation.
 6. An approved synthetic unsupported question returns the standard insufficient-material response.
 7. Synthetic chat history can be revisited. Deletion is tested only with an explicitly disposable synthetic thread and action-time confirmation when performed through a browser.
@@ -92,7 +92,8 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Check Streamlit logs for safe error categories only; do not add full questions, answers, emails, tokens or course excerpts to logs.
 - Check Supabase project availability/storage and provider dashboards when answer or ingestion flows fail.
 - AI STAR generation stops when its balance reaches zero according to the provider/user report; the app must display its existing safe generation error.
-- Voyage embedding failures affect new ingestion and question retrieval; use the existing safe error paths and retry only after the provider is healthy.
+- Study answers use the primary AI STAR model first. Only timeout/network, HTTP 429 and HTTP 5xx failures receive the single fallback attempt; authentication, request-validation and malformed-output failures remain non-retryable.
+- Voyage embedding failures affect new ingestion and question retrieval. Document indexing uses six-chunk batches with 21 seconds between calls; HTTP 429 waits 61 seconds before its single bounded retry. Do not click re-index again while a run is still active.
 - Do not re-index or delete the ready course document as a health check.
 - Student quiz creation is local and does not consume provider balance.
 - V2.2's three approved synthetic generations reached the provider's output-length limit. V2.3's Rank set and V2.5's Eigenvalues set passed manual source review. V2.8's raw SVD diagnostic stopped normally at 4,761/5,000 completion tokens and passed structural validation, but V2.9's normal application path still truncated at 6,000. The runtime cap was restored to 5,000. This variability makes further cap increases a poor reliability strategy. Do not make another call, change reasoning behavior, switch providers/models or redesign the workflow without approval; authenticated quiz browser/accessibility checks remain not tested.
@@ -100,14 +101,24 @@ Record date, tester role, result and evidence without recording secrets, identit
 - Quiz questions are transient. Only score, mastery, difficulty mix, topic, email-linked profile and timestamps are stored.
 - Apply migrations only in filename order and only after separately confirming the target project and reviewing the SQL. Future migrations require a separately approved phase.
 
+## Voyage cutover verification
+
+Use this only for an explicitly approved migration/cutover, not routine health checking.
+
+1. Re-index only the currently active ready document and allow the paced run to finish without starting another attempt.
+2. Confirm the Documents page shows a ready active version using `voyage-4-lite`; if indexing fails, confirm the previous Gemini version is still active.
+3. Ask one approved supported Study question and verify that the answer cites the expected PDF page.
+4. Ask one approved unsupported question and verify the standard insufficient-material response.
+5. Verify the deployed `0.46` similarity threshold with grounded citation evidence. It is the midpoint of the observed `0.4280–0.4925` unsupported/supported gap; do not change it without repeating the approved calibration.
+
 ## Incident triage
 
 | Symptom | First checks | Safe response |
 |---|---|---|
 | App unavailable | Streamlit app status/logs and recent deployment | Reboot the app; if a release caused it, roll back to the last known-good commit/deployment. |
 | Login loop/failure | Final app URL, Streamlit `auth.redirect_uri`, Google authorized redirect URI | Make the URIs identical, including HTTPS and `/oauth2callback`; do not weaken domain checks. |
-| All questions fail before generation | Voyage allowance/rate limit/key and Supabase availability | Keep safe error output; do not bypass retrieval or answer from model knowledge. |
-| Generation fails | AI STAR balance/status/key | Keep safe error output; do not switch models/providers without a new approval. |
+| All questions fail before generation | Active embedding model, Voyage allowance/rate limit/key and Supabase availability | Keep safe error output; verify the Voyage re-index completed and do not bypass retrieval or answer from model knowledge. |
+| Generation fails | Primary and fallback AI STAR outcomes, balance/status/key | Keep safe error output; do not add retries or switch providers without a new approval. |
 | Quiz creation fails | Exact topic name and bank capacity for the mastery mix | Add source-checked bank content or deactivate the unsupported topic; do not save an attempt. |
 | Incorrect or missing citations | Retrieval/evaluation evidence and active document version | Pause pilot use if systemic; do not lower citation validation. |
 | Suspected secret exposure | Affected service and repository/log surface | Disable the app if needed, rotate the specific credential, inspect exposure scope and record the incident. Never paste the credential into chat. |
@@ -143,7 +154,7 @@ Record date, tester role, result and evidence without recording secrets, identit
 | Dependencies | PASS locally | Latest V1.4 OSV scan covered 74 installed distributions with zero advisories after pip remediation; rerun before deployment. |
 | Accessibility | PASS with limits | Light-theme contrast, keyboard focus and 390-pixel width passed. Dark theme and a separate student-account browser session were not tested. |
 | Performance/capacity | PARTIAL | Health/latency/memory and a three-request answer burst were measured. Class-wide capacity is not established. |
-| Deployment | NOT TESTED | No GitHub target, Streamlit app URL or deployed smoke-test evidence yet. |
+| Deployment | PASS with pending retrieval evidence | The app is deployed from dedicated `main` and the Voyage re-index succeeded; retrieval/citation verification remains pending. |
 | Rollback/operations | PASS as procedure | This document defines response and rollback; real execution remains untested until deployment. |
 
 Final release status cannot exceed **controlled pilot candidate** until the real URL and deployed critical paths pass and the user explicitly approves release.

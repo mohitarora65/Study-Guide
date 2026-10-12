@@ -22,7 +22,7 @@ from study_guide.embeddings import (
 MAX_QUESTION_CHARS = 1_000
 MAX_ANSWER_CHARS = 8_000
 RETRIEVAL_COUNT = 8
-MIN_SIMILARITY = 0.70
+MIN_SIMILARITY = 0.46
 AI_STAR_BASE_URL = "https://ai.starimg.ru/v1"
 AI_STAR_MODEL = "deepseek-v4-flash"
 AI_STAR_FALLBACK_MODEL = "deepseek-v4.1-flash"

@@ -62,7 +62,7 @@ def test_retrieval_uses_bounded_active_chunk_search() -> None:
             assert name == "match_chunks_voyage"
             assert len(args["query_embedding"]) == 1024  # type: ignore[arg-type]
             assert args["match_count"] == 8
-            assert args["min_similarity"] == 0.70
+            assert args["min_similarity"] == 0.46
             return Rpc()
 
     assert retrieve_evidence(Client(), [0.1] * 1024) == [{"chunk_id": "c1"}]

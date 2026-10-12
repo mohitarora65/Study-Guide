@@ -10,7 +10,9 @@ V1.2–V1.4 provide private PDF ingestion, grounded answers, citations, chat his
 
 V3 is deployed from `main`, and its additive schema migration is applied in production. It classifies uploads as Theory or Questions, assigns Mid Sem / End Sem / Class Quiz coverage, scopes Study retrieval, extracts deterministic question drafts with page provenance, requires admin review, and prefers approved uploaded questions while retaining the bundled bank as fallback.
 
-The final UI polish is implemented locally: new chats accept an optional name and otherwise use the first question, saved chats can be renamed, the Study and Quiz headings are friendlier, and the uploader now displays the real 25 MB limit. Quick Quiz retains the seven-question mastery workflow; Custom Quiz lets students choose topics, 5/7/10 questions and difficulty levels without writing practice results to mastery/history.
+The final UI polish is deployed: new chats accept an optional name and otherwise use the first question, saved chats can be renamed, the Study and Quiz headings are friendlier, and the uploader displays the real 25 MB limit. Quick Quiz retains the seven-question mastery workflow; Custom Quiz lets students choose topics, 5/7/10 questions and difficulty levels without writing practice results to mastery/history.
+
+The Voyage migration, bounded answer-model fallback and free-tier ingestion pacing are deployed. The active course PDF was successfully re-indexed with Voyage on 2026-10-12. The production cutover still needs a grounded Study answer with a valid citation before retrieval quality and the similarity threshold are considered verified.
 
 The bundled bank contains 11 questions for each approved topic—four easy, four medium and three hard—so every mastery mix can be assembled locally. Question and option order are randomized. Unsupported topics fail safely until source-checked questions are added. See `PHASE_PLAN_QUESTION_BANK.md`.
 
@@ -65,6 +67,7 @@ Apply the migrations in filename order only after confirming the target is a dev
 2. `supabase/migrations/002_ingestion.sql` adds ingestion metrics, the private `course-pdfs` bucket, atomic activation/deletion functions and active-version vector search.
 3. `supabase/migrations/003_adaptive_quiz.sql` adds private quiz topics, profiles, mastery and summary attempts plus atomic completion/profile-deletion functions.
 4. `supabase/migrations/004_study_modes_and_questions.sql` adds document classification, private question drafts and coverage-scoped retrieval. It was applied to production with explicit approval on 2026-10-11.
+5. `supabase/migrations/005_voyage_embeddings.sql` adds separate 1,024-dimensional Voyage vectors and private Voyage search functions while retaining legacy Gemini vectors for rollback. It was applied to production with explicit approval on 2026-10-12.
 
 All migrations preserve the server-only boundary: browser roles cannot access protected tables/functions, and the source-PDF bucket is private.
 
@@ -86,7 +89,8 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 - PDFs must be readable, unencrypted and text-based. OCR is not included.
 - SHA-256 duplicate detection prevents the same bytes from creating another document.
 - Text stays within its real 1-based PDF page and is packed along paragraph, list and sentence boundaries into chunks of up to 2,400 characters. Complete trailing units provide up to 250 characters of overlap; oversized unbroken text uses a deterministic hard split.
-- Embeddings use `voyage-4-lite` with its native 1,024-dimensional float output and distinct `document`/`query` retrieval modes. The adapter uses the standard library with bounded responses, explicit timeouts and no hidden retries.
+- Embeddings use `voyage-4-lite` with its native 1,024-dimensional float output and distinct `document`/`query` retrieval modes. The standard-library adapter validates bounded responses and uses explicit timeouts.
+- Document indexing sends at most six chunks per request and waits 21 seconds between requests for the current 10,000 TPM / 3 RPM free-tier limits. A transient failure is retried once; HTTP 429 waits one full 61-second rate window.
 - Migration `005_voyage_embeddings.sql` keeps the legacy 768-dimensional Gemini column for rollback and adds a separate Voyage column and private search functions. Existing documents must be re-indexed before Voyage retrieval can return them.
 - A replacement version becomes searchable only after every chunk is stored. Failed replacement attempts leave the earlier ready version active.
 - Delete first removes the document from retrieval, then removes the private object and derived database rows.
@@ -144,4 +148,5 @@ A reviewed subset can be run with `--limit N`, but it is not a full-set release 
 - Streamlit Community Cloud and Supabase free hosting do not guarantee capacity or uptime for simultaneous class-wide use.
 - Historical live-generation trials were unreliable, so the student path now uses the bundled bank. Automated checks and source review cover all 33 questions. Quiz keyboard/focus behavior and a fully recorded production submission/progress-sync flow remain pending. See `PHASE_PLAN_QUESTION_BANK.md` and `OPERATIONS.md`.
 - V3 deterministic extraction recognizes numbered questions, A–D option lines and simple answer-key lines. It does not infer answers, OCR scans, or reliably reconstruct complex multi-column layouts; admins must complete and review every extracted MCQ. The production schema and V3 application are deployed; a fully recorded extraction/review/custom-quiz production flow remains pending.
+- Voyage retrieval-only calibration over the 40 TA-approved questions found a clean gap: all 25 supported questions scored at least `0.4925`, while all 15 unsupported questions scored at most `0.4280`. The local cutoff is `0.46`, the midpoint of that observed gap. Grounded answer/citation checks remain pending after deployment; do not change the cutoff without repeating the calibration.
 # Study-Guide

@@ -70,7 +70,7 @@ def search_active_chunks(
     query_embedding: list[float],
     *,
     match_count: int = 8,
-    min_similarity: float = 0.70,
+    min_similarity: float = 0.46,
     study_scope: str | None = None,
 ) -> list[dict[str, Any]]:
     if (
