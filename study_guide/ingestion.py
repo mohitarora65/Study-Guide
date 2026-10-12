@@ -233,7 +233,8 @@ def embed_chunks(
                 ) from exc
             except EmbeddingProviderError as exc:
                 if attempt == 0 and _is_transient(exc):
-                    sleep(1)
+                    # shortcut: Voyage exposes no retry delay here; use one full rate window.
+                    sleep(61 if exc.status_code == 429 else 1)
                     continue
                 if exc.status_code == 429:
                     raise IngestionError(

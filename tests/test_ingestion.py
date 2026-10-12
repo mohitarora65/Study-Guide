@@ -168,6 +168,7 @@ def test_retries_one_transient_embedding_failure() -> None:
 
 def test_reports_exhausted_embedding_quota_after_retry() -> None:
     attempts = 0
+    delays: list[float] = []
 
     def embedder(*_args: object, **_kwargs: object) -> list[list[float]]:
         nonlocal attempts
@@ -179,10 +180,11 @@ def test_reports_exhausted_embedding_quota_after_retry() -> None:
             (_chunk(),),
             "key",
             embedder=embedder,
-            sleep=lambda _seconds: None,
+            sleep=delays.append,
         )
 
     assert attempts == 2
+    assert delays == [61]
     assert error.value.code == "EMBEDDING_QUOTA_EXCEEDED"
     assert "private provider detail" not in str(error.value)
 
