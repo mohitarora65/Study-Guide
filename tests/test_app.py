@@ -241,6 +241,7 @@ with patch.object(app, "build_client", return_value=object()), \\
      ]), \\
      patch.object(app, "get_topic_mastery", return_value=None), \\
      patch.object(app, "generate_bank_quiz", return_value=quiz), \\
+     patch.object(app, "generate_quiz", side_effect=AssertionError("bank quiz must not call provider")), \\
      patch.object(app, "complete_quiz_attempt", side_effect=save_summary):
     app.render_quiz_page(settings, identity)
 '''
@@ -323,6 +324,7 @@ with patch.object(app, "build_client", return_value=object()), \\
      ]), \\
      patch.object(app, "get_topic_mastery", return_value=None), \\
      patch.object(app, "generate_bank_quiz", side_effect=QuizError(message)), \\
+     patch.object(app, "generate_quiz", side_effect=QuizError(message)), \\
      patch.object(app, "complete_quiz_attempt", side_effect=AssertionError("failed quiz must not be saved")):
     app.render_quiz_page(settings, identity)
 '''
@@ -335,7 +337,7 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert "saved_quiz_summary" not in app.session_state
 
 
-def test_quiz_page_hides_topics_without_reviewed_bank_content() -> None:
+def test_quiz_page_keeps_active_topic_available_for_material_generation() -> None:
     script = '''
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -350,8 +352,52 @@ with patch.object(app, "build_client", return_value=object()), \\
     app = AppTest.from_string(script).run()
 
     assert not app.exception
-    assert "approve course questions for other topics" in app.info[0].value
-    assert not any(button.label == "Start 7-question quiz" for button in app.button)
+    assert app.selectbox[0].options == ["Unreviewed topic"]
+    assert any(button.label == "Start 7-question quiz" for button in app.button)
+
+
+def test_quick_quiz_falls_back_to_grounded_generation_for_active_topic() -> None:
+    script = '''
+from types import SimpleNamespace
+from unittest.mock import patch
+import app
+import streamlit as st
+from study_guide.quizzing import GeneratedQuiz, QuizError, QuizQuestion
+
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key="a" * 32)
+identity = SimpleNamespace(user_key="synthetic-owner", email="student@iiti.ac.in")
+question = QuizQuestion(
+    prompt="What is supervised learning?", options=("A", "B", "C", "D"),
+    correct_index=0, difficulty="easy", explanation="Labels guide learning.",
+    citations=({"display_name": "ml.pdf", "page_number": 3},),
+)
+quiz = GeneratedQuiz(
+    topic="machine learning", mastery_before=None,
+    difficulty_mix={"easy": 4, "medium": 3, "hard": 0}, questions=(question,) * 7,
+)
+def generate(*args, **kwargs):
+    st.session_state["fallback_scope"] = kwargs["study_scope"]
+    return quiz
+with patch.object(app, "build_client", return_value=object()), \\
+     patch.object(app, "list_approved_question_topic_ids", return_value=set()), \\
+     patch.object(app, "list_quiz_topics", return_value=[
+         {"id": "ml-topic", "name": "machine learning", "active": True}
+     ]), \\
+     patch.object(app, "get_topic_mastery", return_value=None), \\
+     patch.object(app, "list_approved_questions", return_value=[]), \\
+     patch.object(app, "generate_bank_quiz", side_effect=QuizError("No reviewed questions.")), \\
+     patch.object(app, "active_study_scope", return_value="class_quiz"), \\
+     patch.object(app, "generate_quiz", side_effect=generate):
+    app.render_quiz_page(settings, identity)
+'''
+    app = AppTest.from_string(script).run()
+    assert not app.exception
+
+    next(button for button in app.button if button.label == "Start 7-question quiz").click().run()
+
+    assert not app.exception
+    assert app.session_state["active_quiz"].topic == "machine learning"
+    assert app.session_state["fallback_scope"] == "class_quiz"
 
 
 def test_quiz_page_shows_topic_with_approved_extracted_questions() -> None:

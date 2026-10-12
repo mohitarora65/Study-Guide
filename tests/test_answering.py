@@ -5,6 +5,7 @@ import pytest
 from study_guide.answering import (
     AI_STAR_BASE_URL,
     AI_STAR_FALLBACK_MODEL,
+    AI_STAR_FINAL_FALLBACK_MODEL,
     AI_STAR_MODEL,
     AnsweringError,
     INSUFFICIENT_MATERIAL,
@@ -176,6 +177,60 @@ def test_ai_star_uses_fallback_once_after_transient_failure() -> None:
 
     assert _call_ai_star("a" * 32, [], opener=opener) == "{}"
     assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
+
+
+def test_answer_generation_reaches_composer_after_two_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from io import BytesIO
+    from urllib.error import HTTPError
+    import study_guide.answering as answering
+
+    monkeypatch.setattr(answering, "embed_question", lambda *_args: [0.1] * 1024)
+    evidence = [{
+        "document_id": "d", "version_id": "v", "chunk_id": "c",
+        "display_name": "notes.pdf", "page_number": 3,
+        "content": "A basis is linearly independent and spans the space.",
+    }]
+    monkeypatch.setattr(answering, "retrieve_evidence", lambda *_args: evidence)
+    models: list[str] = []
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({
+                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+                    "answer": "A basis is independent and spanning.",
+                    "cited_chunk_ids": ["c"],
+                })}}]
+            }).encode()
+
+    def opener(request: object, *, timeout: int) -> Response:
+        model = json.loads(request.data)["model"]  # type: ignore[attr-defined]
+        models.append(model)
+        if len(models) == 1:
+            raise HTTPError(request.full_url, 503, "provider busy", {}, BytesIO())  # type: ignore[attr-defined]
+        if len(models) == 2:
+            raise TimeoutError("fallback busy")
+        return Response()
+
+    result = answer_question(
+        "What is a basis?",
+        voyage_api_key="v" * 32,
+        ai_star_api_key="a" * 32,
+        database_client=object(),
+        user_key="composer-fallback-test-user",
+        opener=opener,
+    )
+
+    assert result.text == "A basis is independent and spanning."
+    assert result.citations[0]["page_number"] == 3
+    assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL, AI_STAR_FINAL_FALLBACK_MODEL]
 
 
 @pytest.mark.parametrize("status", [429, 503])

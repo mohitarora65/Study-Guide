@@ -56,7 +56,7 @@ from study_guide.question_bank import (
     generate_custom_bank_quiz,
     has_bank_topic,
 )
-from study_guide.quizzing import QuizError, grade_quiz
+from study_guide.quizzing import QuizError, generate_quiz, grade_quiz
 from study_guide.study_modes import STUDY_MODE_LABELS, STUDY_SCOPES, active_study_scope
 
 
@@ -249,21 +249,20 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
             )
         except DatabaseError:
             extracted_topic_ids = set()
-        topics = [
-            topic for topic in list_quiz_topics(client)
-            if has_bank_topic(topic.get("name")) or topic.get("id") in extracted_topic_ids
-        ]
+        topics = list_quiz_topics(client)
     except DatabaseError as exc:
         st.error(str(exc))
         return
     if not topics:
-        st.info(
-            "No active topics with quiz questions are available. Built-in questions match by topic name; "
-            "approve course questions for other topics."
-        )
+        st.info("No active quiz topics are available.")
         return
 
     topic_by_id = {topic["id"]: topic for topic in topics}
+    bank_topics = {
+        topic["id"]: topic
+        for topic in topics
+        if has_bank_topic(topic.get("name")) or topic.get("id") in extracted_topic_ids
+    }
     active = "active_quiz" in st.session_state
     quiz_type = st.radio(
         "Quiz type",
@@ -290,23 +289,44 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
                     )
                 except DatabaseError:
                     reviewed = []
-                with st.spinner("Preparing a reviewed quiz from the course material…"):
-                    st.session_state.active_quiz = generate_bank_quiz(
-                        topic_by_id[selected_topic_id]["name"],
-                        mastery,
-                        source_questions=reviewed,
-                    )
+                with st.spinner(
+                    "Checking available questions; generating from course material if needed…"
+                ):
+                    try:
+                        quiz = generate_bank_quiz(
+                            topic_by_id[selected_topic_id]["name"],
+                            mastery,
+                            source_questions=reviewed,
+                        )
+                    except QuizError:
+                        quiz = generate_quiz(
+                            topic_by_id[selected_topic_id]["name"],
+                            mastery_before=mastery,
+                            voyage_api_key=settings.voyage_api_key,
+                            ai_star_api_key=settings.ai_star_api_key,
+                            database_client=client,
+                            user_key=identity.user_key,
+                            study_scope=active_study_scope(
+                                st.session_state.get("study_mode")
+                            ),
+                        )
+                    st.session_state.active_quiz = quiz
                 st.session_state.active_quiz_kind = "quick"
                 st.session_state.active_quiz_topic_id = selected_topic_id
                 st.rerun()
             except (DatabaseError, QuizError) as exc:
                 st.error(str(exc))
     else:
+        if not bank_topics:
+            st.info(
+                "Custom Quiz needs built-in or approved questions. "
+                "Use Quick Quiz to generate from course material."
+            )
         selected_topic_ids = st.multiselect(
             "Topics",
-            list(topic_by_id),
-            default=[next(iter(topic_by_id))],
-            format_func=lambda topic_id: topic_by_id[topic_id]["name"],
+            list(bank_topics),
+            default=[next(iter(bank_topics))] if bank_topics else [],
+            format_func=lambda topic_id: bank_topics[topic_id]["name"],
             disabled=active,
         )
         question_count = st.selectbox(
@@ -491,8 +511,8 @@ def render_quiz_progress_page(settings: Settings, identity: Identity) -> None:
 def render_quiz_topics_page(settings: Settings) -> None:
     st.title("Quiz topics")
     st.caption(
-        "Adaptive Quiz shows active topics with built-in questions matching the name or approved course questions. "
-        "New topics and renamed topics without a built-in match need approved course questions."
+        "Quick Quiz checks built-in and approved course questions first, then generates cited questions from "
+        "the current study material when the bank cannot fill a quiz."
     )
     flash = st.session_state.pop("quiz_topics_flash", None)
     if flash:

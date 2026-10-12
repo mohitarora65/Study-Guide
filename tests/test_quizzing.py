@@ -174,7 +174,43 @@ def test_quiz_provider_payload_excludes_student_identity() -> None:
     assert "opaque-private-owner-key" not in payload
     assert "@iiti.ac.in" not in payload
     assert "limit each explanation to eight words" in captured[0]["content"]
-    assert "never write that product as Ay" in captured[0]["content"]
+    assert "never as Ay" in captured[0]["content"]
+
+
+def test_generated_quiz_retrieval_uses_selected_study_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    import study_guide.quizzing as quizzing
+
+    observed: dict[str, object] = {}
+
+    def retrieve(_client: object, _embedding: list[float], study_scope: str | None) -> list[dict[str, object]]:
+        observed["study_scope"] = study_scope
+        return EVIDENCE
+
+    monkeypatch.setattr(quizzing, "embed_question", lambda _question, _key: [0.1])
+    monkeypatch.setattr(quizzing, "retrieve_evidence", retrieve)
+    call_count = 0
+
+    def generate(messages: list[dict[str, str]]) -> str:
+        nonlocal call_count
+        call_count += 1
+        mix = json.loads(messages[1]["content"])["required_difficulty_mix"]
+        payload = json.loads(quiz_json(mix))
+        for row in payload["questions"]:
+            row["question"] = f"Batch {call_count}: {row['question']}"
+        return json.dumps(payload)
+
+    generate_quiz(
+        "Scoped topic",
+        mastery_before=None,
+        voyage_api_key="v" * 32,
+        ai_star_api_key="a" * 32,
+        database_client=object(),
+        user_key="scope-test-owner",
+        study_scope="class_quiz",
+        generator=generate,
+    )
+
+    assert observed["study_scope"] == "class_quiz"
 
 
 def test_ai_star_adapter_disables_hidden_transport_retries(monkeypatch: pytest.MonkeyPatch) -> None:

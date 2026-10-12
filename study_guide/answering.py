@@ -26,6 +26,7 @@ MIN_SIMILARITY = 0.46
 AI_STAR_BASE_URL = "https://ai.starimg.ru/v1"
 AI_STAR_MODEL = "deepseek-v4-flash"
 AI_STAR_FALLBACK_MODEL = "deepseek-v4.1-flash"
+AI_STAR_FINAL_FALLBACK_MODEL = "composer-2.5-fast"
 MAX_CONTEXT_CHARS = 12_000
 MAX_HISTORY_CHARS = 4_000
 MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
@@ -115,7 +116,7 @@ def _check_rate_limit(user_key: str) -> None:
 def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any = None) -> str:
     if not api_key:
         raise AnsweringError("Answer generation is not configured yet.")
-    models = (AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL)
+    models = (AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL, AI_STAR_FINAL_FALLBACK_MODEL)
     for index, model in enumerate(models):
         request = Request(
             f"{AI_STAR_BASE_URL}/chat/completions",
@@ -138,11 +139,11 @@ def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any =
             with (opener or urlopen)(request, timeout=30) as response:
                 raw = response.read(MAX_PROVIDER_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            if index == 0 and (exc.code == 429 or 500 <= exc.code < 600):
+            if index < len(models) - 1 and (exc.code == 429 or 500 <= exc.code < 600):
                 continue
             raise AnsweringError("Answer generation is temporarily unavailable.") from exc
         except (URLError, TimeoutError, OSError) as exc:
-            if index == 0:
+            if index < len(models) - 1:
                 continue
             raise AnsweringError("Answer generation is temporarily unavailable.") from exc
         try:
