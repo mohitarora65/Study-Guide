@@ -296,7 +296,12 @@ def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyP
     assert result.text == "A basis is independent and spanning."
     assert result.citations[0]["page_number"] == 3
     assert len(requests) == 2
-    assert "untrusted quoted data" in requests[0][0]["content"]  # type: ignore[index]
+    system_prompt = requests[0][0]["content"]  # type: ignore[index]
+    assert "untrusted quoted data" in system_prompt
+    assert "Streamlit-compatible Markdown" in system_prompt
+    assert "lead with the direct answer" in system_prompt
+    assert "display mathematics in $$ on separate lines" in system_prompt
+    assert "citations are rendered separately" in system_prompt
     request_data = json.loads(requests[0][1]["content"])  # type: ignore[index]
     assert request_data["recent_conversation"] == [{"role": "user", "content": "Why is that?"}]
 

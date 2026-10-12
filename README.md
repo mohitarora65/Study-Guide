@@ -45,7 +45,7 @@ Generate separate strong random values for `cookie_secret` and `user_key_secret`
 
 Set the Voyage key only in the local `[voyage]` section and the AI STAR key only in `[ai_star]`. Both are used server-side and are never sent to Supabase or the browser. Voyage receives course chunks during indexing and individual student search questions during retrieval; AI STAR receives the question, a bounded recent conversation and retrieved course excerpts. Neither request includes the student's email or account identifier. Provider retention and account terms must be reviewed by the operator.
 
-Study answers use `deepseek-v4-flash` first. A timeout, network failure, HTTP 429 or HTTP 5xx response triggers one attempt with `deepseek-v4.1-flash`; authentication, request-validation and malformed-output failures are not retried.
+Study answers use `deepseek-v4-flash` first and render concise Markdown with readable mathematical notation. A timeout, network failure, HTTP 429 or HTTP 5xx response triggers one attempt with `deepseek-v4.1-flash`; authentication, request-validation and malformed-output failures are not retried.
 
 Run the app:
 
@@ -90,7 +90,7 @@ All migrations preserve the server-only boundary: browser roles cannot access pr
 - SHA-256 duplicate detection prevents the same bytes from creating another document.
 - Text stays within its real 1-based PDF page and is packed along paragraph, list and sentence boundaries into chunks of up to 2,400 characters. Complete trailing units provide up to 250 characters of overlap; oversized unbroken text uses a deterministic hard split.
 - Embeddings use `voyage-4-lite` with its native 1,024-dimensional float output and distinct `document`/`query` retrieval modes. The standard-library adapter validates bounded responses and uses explicit timeouts.
-- Document indexing uses Voyage's model-specific tokenizer to keep each request at or below 9,800 tokens and waits one 61-second rate window between requests for the current 10,000 TPM / 3 RPM free-tier limits. A transient failure is retried once; HTTP 429 also waits one full rate window.
+- Document indexing uses Voyage's model-specific tokenizer to keep each request at or below 8,000 tokens, leaving headroom under the current 10,000 TPM / 3 RPM free-trial limits, and waits one 61-second rate window between requests. A transient failure is retried once; HTTP 429 also waits one full rate window.
 - Migration `005_voyage_embeddings.sql` keeps the legacy 768-dimensional Gemini column for rollback and adds a separate Voyage column and private search functions. Existing documents must be re-indexed before Voyage retrieval can return them.
 - A replacement version becomes searchable only after every chunk is stored. Failed replacement attempts leave the earlier ready version active.
 - Delete first removes the document from retrieval, then removes the private object and derived database rows.

@@ -142,7 +142,7 @@ def test_embeds_in_token_bounded_batches_and_dimension() -> None:
         token_counter=lambda texts: [300] * len(texts),
     )
 
-    assert [len(call[0]) for call in calls] == [32, 1]
+    assert [len(call[0]) for call in calls] == [26, 7]
     assert delays == [61]
     assert calls[0][1:] == ("key", "document")
     assert len(vectors[0]) == 1024
@@ -188,7 +188,7 @@ def test_rejects_chunk_over_safe_embedding_token_limit() -> None:
         embed_chunks(
             (_chunk(),),
             "key",
-            token_counter=lambda _texts: [9_801],
+            token_counter=lambda _texts: [8_001],
         )
 
     assert error.value.code == "EMBEDDING_CHUNK_TOO_LARGE"

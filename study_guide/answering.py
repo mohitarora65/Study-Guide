@@ -222,7 +222,11 @@ def answer_question(
                 "outside knowledge or claim unsupported details. If it does not support an "
                 "answer, return exactly: " + INSUFFICIENT_MATERIAL + " with no cited chunk IDs. "
                 "Otherwise return one JSON object with exactly two fields: answer (string) and "
-                "cited_chunk_ids (array of supplied IDs). Cite only evidence that supports the answer."
+                "cited_chunk_ids (array of supplied IDs). Format answer as concise Streamlit-compatible "
+                "Markdown: lead with the direct answer; use short paragraphs, bullets, or numbered steps "
+                "only when helpful; wrap inline mathematics in $...$ and display mathematics in $$ on "
+                "separate lines. Do not add a sources section because citations are rendered separately. "
+                "Cite only evidence that supports the answer."
             ),
         },
         {
