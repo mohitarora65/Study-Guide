@@ -7,6 +7,7 @@ QUIZ_SCHEMA = Path("supabase/migrations/003_adaptive_quiz.sql").read_text()
 V3_SCHEMA = Path("supabase/migrations/004_study_modes_and_questions.sql").read_text()
 VOYAGE_SCHEMA = Path("supabase/migrations/005_voyage_embeddings.sql").read_text()
 RESUMABLE_SCHEMA = Path("supabase/migrations/006_resumable_ingestion.sql").read_text()
+CUSTOM_QUIZ_SCHEMA = Path("supabase/migrations/007_custom_quiz_history.sql").read_text()
 
 
 def test_schema_contains_required_tables_and_vector_column() -> None:
@@ -120,3 +121,14 @@ def test_resumable_ingestion_schema_persists_batches_and_claims_stale_runs() -> 
     assert "for update of r skip locked" in RESUMABLE_SCHEMA
     assert RESUMABLE_SCHEMA.count("to service_role") == 2
     assert RESUMABLE_SCHEMA.count("from public, anon, authenticated") == 2
+
+
+def test_custom_quiz_history_schema_is_private_and_summary_only() -> None:
+    assert "create table public.custom_quiz_attempts" in CUSTOM_QUIZ_SCHEMA
+    assert "references public.quiz_profiles(user_key) on delete cascade" in CUSTOM_QUIZ_SCHEMA
+    assert "function public.complete_custom_quiz_attempt" in CUSTOM_QUIZ_SCHEMA
+    assert "alter table public.custom_quiz_attempts enable row level security" in CUSTOM_QUIZ_SCHEMA
+    assert "from public, anon, authenticated" in CUSTOM_QUIZ_SCHEMA
+    assert "to service_role" in CUSTOM_QUIZ_SCHEMA
+    assert "question text" not in CUSTOM_QUIZ_SCHEMA
+    assert "mastery" not in CUSTOM_QUIZ_SCHEMA

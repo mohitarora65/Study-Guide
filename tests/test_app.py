@@ -270,6 +270,7 @@ with patch.object(app, "build_client", return_value=object()), \\
 
 def test_custom_quiz_is_practice_only_and_summarizes_five_questions() -> None:
     script = '''
+import streamlit as st
 from types import SimpleNamespace
 from unittest.mock import patch
 import app
@@ -287,13 +288,17 @@ quiz = GeneratedQuiz(
     difficulty_mix={"easy": 5, "medium": 0, "hard": 0},
     questions=(question,) * 5,
 )
+def save_summary(_client, **values):
+    st.session_state["saved_custom_quiz_summary"] = values
+    return {"score": 100, "duplicate": False}
 with patch.object(app, "build_client", return_value=object()), \\
      patch.object(app, "list_quiz_topics", return_value=[
          {"id": "topic-1", "name": "Rank and fundamental subspaces", "active": True}
      ]), \\
      patch.object(app, "list_approved_questions", return_value=[]), \\
      patch.object(app, "generate_custom_bank_quiz", return_value=quiz), \\
-     patch.object(app, "complete_quiz_attempt", side_effect=AssertionError("must not persist")):
+     patch.object(app, "complete_quiz_attempt", side_effect=AssertionError("must not update mastery")), \\
+     patch.object(app, "complete_custom_quiz_attempt", side_effect=save_summary):
     app.render_quiz_page(settings, identity)
 '''
     app = AppTest.from_string(script).run()
@@ -309,7 +314,11 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert not app.exception
     assert any("Score: 5/5" in success.value for success in app.success)
     assert any("Correct: 5" in success.value for success in app.success)
-    assert "mastery_after" not in app.session_state.get("saved_quiz_summary", {})
+    saved = app.session_state["saved_custom_quiz_summary"]
+    assert saved["topics"] == ("Rank and fundamental subspaces",)
+    assert saved["question_count"] == 5
+    assert saved["correct_count"] == 5
+    assert "mastery_after" not in saved
 
 
 def test_failed_quiz_generation_shows_safe_error_without_saving_attempt() -> None:
@@ -466,14 +475,23 @@ with patch.object(app, "build_client", return_value=object()), \\
      patch.object(app, "list_student_quiz_attempts", return_value=[{
          "topic": "Vector spaces", "correct_count": 5, "score": 71.43,
          "mastery_after": 71, "completed_at": "2026-10-10T00:00:00Z",
+     }]), \\
+     patch.object(app, "list_student_custom_quiz_attempts", return_value=[{
+         "topics": ["Vectors", "Matrices"], "question_count": 5,
+         "correct_count": 4, "score": 80,
+         "completed_at": "2026-10-11T00:00:00Z",
      }]):
     app.render_quiz_progress_page(settings, identity)
 '''
     app = AppTest.from_string(script).run(timeout=10)
 
     assert not app.exception
-    assert [item.value for item in app.subheader] == ["Topic mastery", "Quiz summaries"]
-    assert len(app.dataframe) == 2
+    assert [item.value for item in app.subheader] == [
+        "Topic mastery", "Quick Quiz summaries", "Custom Quiz summaries"
+    ]
+    assert len(app.dataframe) == 3
+    assert app.dataframe[2].value.iloc[0]["Topics"] == "Vectors, Matrices"
+    assert app.dataframe[2].value.iloc[0]["Score"] == "4/5 (80%)"
 
 
 def test_admin_progress_filter_matches_email_case_insensitively() -> None:

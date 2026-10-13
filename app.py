@@ -18,6 +18,7 @@ from study_guide.database import (
     DatabaseError,
     append_turn,
     build_client,
+    complete_custom_quiz_attempt,
     complete_quiz_attempt,
     create_quiz_topic,
     create_thread,
@@ -33,6 +34,7 @@ from study_guide.database import (
     list_question_candidates,
     list_quiz_topics,
     list_student_quiz_attempts,
+    list_student_custom_quiz_attempts,
     list_student_quiz_progress,
     list_thread_messages,
     list_threads,
@@ -84,7 +86,13 @@ def render_sign_in() -> None:
 
 
 def _clear_quiz_session() -> None:
-    for key in ("active_quiz", "active_quiz_kind", "active_quiz_topic_id", "quiz_result"):
+    for key in (
+        "active_quiz",
+        "active_quiz_kind",
+        "active_quiz_topic_id",
+        "active_custom_quiz_topics",
+        "quiz_result",
+    ):
         st.session_state.pop(key, None)
     for number in range(1, 11):
         st.session_state.pop(f"quiz-answer-{number}", None)
@@ -359,6 +367,7 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
                         )
                     st.session_state.active_quiz = quiz
                 st.session_state.active_quiz_kind = "custom"
+                st.session_state.active_custom_quiz_topics = tuple(topic_sources)
                 st.rerun()
             except (DatabaseError, QuizError) as exc:
                 st.error(str(exc))
@@ -442,10 +451,16 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
                 for level in ("easy", "medium", "hard")
             }
             if st.session_state.get("active_quiz_kind") == "custom":
-                saved = {
-                    "score": round(correct_count * 100 / len(quiz.questions), 2),
-                    "mastery_after": None,
-                }
+                saved = complete_custom_quiz_attempt(
+                    client,
+                    attempt_id=str(uuid4()),
+                    user_key=identity.user_key,
+                    email=identity.email,
+                    topics=st.session_state.active_custom_quiz_topics,
+                    question_count=len(quiz.questions),
+                    correct_count=correct_count,
+                    difficulty_mix=quiz.difficulty_mix,
+                )
             else:
                 saved = complete_quiz_attempt(
                     client,
@@ -473,40 +488,60 @@ def render_quiz_progress_page(settings: Settings, identity: Identity) -> None:
     try:
         progress = list_student_quiz_progress(client, identity.user_key)
         attempts = list_student_quiz_attempts(client, identity.user_key)
+        custom_attempts = list_student_custom_quiz_attempts(client, identity.user_key)
     except DatabaseError as exc:
         st.error(str(exc))
         return
-    if not progress:
-        st.info("Complete a quiz to begin tracking topic mastery.")
+    if not progress and not attempts and not custom_attempts:
+        st.info("Complete a quiz to begin tracking progress.")
         return
-    st.subheader("Topic mastery")
-    st.dataframe(
-        [
-            {
-                "Topic": row["topic"],
-                "Mastery": f"{row['mastery_score']}%",
-                "Latest score": f"{row['latest_score']}%",
-                "Attempts": row["attempt_count"],
-            }
-            for row in progress
-        ],
-        hide_index=True,
-        width="stretch",
-    )
-    st.subheader("Quiz summaries")
-    st.dataframe(
-        [
-            {
-                "Topic": row["topic"],
-                "Score": f"{row['correct_count']}/7 ({row['score']}%)",
-                "Mastery after": f"{row['mastery_after']}%",
-                "Completed": row["completed_at"],
-            }
-            for row in attempts
-        ],
-        hide_index=True,
-        width="stretch",
-    )
+    if progress:
+        st.subheader("Topic mastery")
+        st.dataframe(
+            [
+                {
+                    "Topic": row["topic"],
+                    "Mastery": f"{row['mastery_score']}%",
+                    "Latest score": f"{row['latest_score']}%",
+                    "Attempts": row["attempt_count"],
+                }
+                for row in progress
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    if attempts:
+        st.subheader("Quick Quiz summaries")
+        st.dataframe(
+            [
+                {
+                    "Topic": row["topic"],
+                    "Score": f"{row['correct_count']}/7 ({row['score']}%)",
+                    "Mastery after": f"{row['mastery_after']}%",
+                    "Completed": row["completed_at"],
+                }
+                for row in attempts
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    if custom_attempts:
+        st.subheader("Custom Quiz summaries")
+        st.dataframe(
+            [
+                {
+                    "Topics": ", ".join(row["topics"]),
+                    "Score": (
+                        f"{row['correct_count']}/{row['question_count']} "
+                        f"({row['score']}%)"
+                    ),
+                    "Completed": row["completed_at"],
+                }
+                for row in custom_attempts
+            ],
+            hide_index=True,
+            width="stretch",
+        )
 
 
 def render_quiz_topics_page(settings: Settings) -> None:

@@ -5,7 +5,9 @@ import pytest
 
 from study_guide.database import (
     DatabaseError,
+    complete_custom_quiz_attempt,
     complete_quiz_attempt,
+    list_student_custom_quiz_attempts,
     list_student_quiz_progress,
 )
 
@@ -83,6 +85,85 @@ def test_quiz_result_rejects_bad_identifiers_or_email_before_database_call() -> 
             difficulty_mix={"easy": 4, "medium": 3, "hard": 0},
         )
     assert client.call is None
+
+
+def test_custom_quiz_result_is_saved_without_mastery_update() -> None:
+    client = Client()
+    attempt_id = str(uuid4())
+
+    result = complete_custom_quiz_attempt(
+        client,
+        attempt_id=attempt_id,
+        user_key="opaque-user-key",
+        email="student@iiti.ac.in",
+        topics=("Vectors", "Matrices"),
+        question_count=5,
+        correct_count=4,
+        difficulty_mix={"easy": 2, "medium": 2, "hard": 1},
+    )
+
+    assert result["score"] == 71.43
+    assert client.call == (
+        "complete_custom_quiz_attempt",
+        {
+            "p_attempt_id": attempt_id,
+            "p_user_key": "opaque-user-key",
+            "p_email": "student@iiti.ac.in",
+            "p_topics": ["Vectors", "Matrices"],
+            "p_question_count": 5,
+            "p_correct_count": 4,
+            "p_difficulty_mix": {"easy": 2, "medium": 2, "hard": 1},
+        },
+    )
+
+
+def test_custom_quiz_result_rejects_a_mix_with_the_wrong_count() -> None:
+    client = Client()
+    with pytest.raises(DatabaseError):
+        complete_custom_quiz_attempt(
+            client,
+            attempt_id=str(uuid4()),
+            user_key="opaque-user-key",
+            email="student@iiti.ac.in",
+            topics=("Vectors",),
+            question_count=5,
+            correct_count=4,
+            difficulty_mix={"easy": 2, "medium": 2, "hard": 2},
+        )
+    assert client.call is None
+
+
+def test_custom_quiz_history_query_is_scoped_to_owner() -> None:
+    observed: dict[str, Any] = {}
+
+    class Query:
+        def select(self, columns: str) -> "Query":
+            observed["columns"] = columns
+            return self
+
+        def eq(self, column: str, value: str) -> "Query":
+            observed["owner"] = (column, value)
+            return self
+
+        def order(self, _column: str, desc: bool = False) -> "Query":
+            return self
+
+        def limit(self, _count: int) -> "Query":
+            return self
+
+        def execute(self) -> Result:
+            return Result([{"topics": ["Vectors"], "question_count": 5}])
+
+    class RowsClient:
+        def table(self, name: str) -> Query:
+            observed["table"] = name
+            return Query()
+
+    rows = list_student_custom_quiz_attempts(RowsClient(), "opaque-owner")
+
+    assert rows[0]["topics"] == ["Vectors"]
+    assert observed["table"] == "custom_quiz_attempts"
+    assert observed["owner"] == ("user_key", "opaque-owner")
 
 
 def test_student_progress_query_is_scoped_to_opaque_owner_key() -> None:

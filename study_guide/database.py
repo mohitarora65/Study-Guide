@@ -767,6 +767,80 @@ def list_student_quiz_attempts(client: Any, user_key: str) -> list[dict[str, Any
         raise DatabaseError("Quiz history could not be loaded") from exc
 
 
+def list_student_custom_quiz_attempts(
+    client: Any, user_key: str
+) -> list[dict[str, Any]]:
+    if not user_key:
+        raise DatabaseError("Custom quiz history could not be loaded")
+    try:
+        return _data(
+            client.table("custom_quiz_attempts")
+            .select("topics,question_count,correct_count,score,difficulty_mix,completed_at")
+            .eq("user_key", user_key)
+            .order("completed_at", desc=True)
+            .limit(200)
+            .execute()
+        ) or []
+    except Exception as exc:
+        raise DatabaseError("Custom quiz history could not be loaded") from exc
+
+
+def complete_custom_quiz_attempt(
+    client: Any,
+    *,
+    attempt_id: str,
+    user_key: str,
+    email: str,
+    topics: tuple[str, ...],
+    question_count: int,
+    correct_count: int,
+    difficulty_mix: dict[str, int],
+) -> dict[str, Any]:
+    if (
+        not user_key
+        or not isinstance(email, str)
+        or email != email.strip().casefold()
+        or "@" not in email
+        or not isinstance(topics, tuple)
+        or not 1 <= len(topics) <= 20
+        or any(
+            not isinstance(topic, str)
+            or topic != topic.strip()
+            or not 1 <= len(topic) <= 100
+            for topic in topics
+        )
+        or len(set(topics)) != len(topics)
+        or question_count not in {5, 7, 10}
+        or type(correct_count) is not int
+        or not 0 <= correct_count <= question_count
+        or difficulty_mix.keys() != {"easy", "medium", "hard"}
+        or any(type(value) is not int or value < 0 for value in difficulty_mix.values())
+        or sum(difficulty_mix.values()) != question_count
+    ):
+        raise DatabaseError("Custom quiz result could not be saved")
+    try:
+        UUID(attempt_id)
+        rows = _data(
+            client.rpc(
+                "complete_custom_quiz_attempt",
+                {
+                    "p_attempt_id": attempt_id,
+                    "p_user_key": user_key,
+                    "p_email": email,
+                    "p_topics": list(topics),
+                    "p_question_count": question_count,
+                    "p_correct_count": correct_count,
+                    "p_difficulty_mix": difficulty_mix,
+                },
+            ).execute()
+        ) or []
+        if not rows:
+            raise ValueError("missing custom quiz result")
+        return rows[0]
+    except Exception as exc:
+        raise DatabaseError("Custom quiz result could not be saved") from exc
+
+
 def complete_quiz_attempt(
     client: Any,
     *,
