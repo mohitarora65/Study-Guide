@@ -142,6 +142,7 @@ def test_ai_star_request_uses_selected_model_and_json_contract() -> None:
     assert captured["auth"] == "Bearer secret-value-not-logged"
     assert captured["timeout"] == 30
     assert captured["body"]["model"] == AI_STAR_MODEL  # type: ignore[index]
+    assert captured["body"]["model"] == "deepseek-v4.1-flash"  # type: ignore[index]
     assert captured["body"]["response_format"] == {"type": "json_object"}  # type: ignore[index]
 
 
@@ -177,6 +178,7 @@ def test_ai_star_uses_fallback_once_after_transient_failure() -> None:
 
     assert _call_ai_star("a" * 32, [], opener=opener) == "{}"
     assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
+    assert models == ["deepseek-v4.1-flash", "deepseek-v4-flash"]
 
 
 def test_answer_generation_reaches_composer_after_two_transient_failures(
