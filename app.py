@@ -28,7 +28,6 @@ from study_guide.database import (
     download_pdf,
     insert_question_candidates,
     list_approved_questions,
-    list_approved_question_topic_ids,
     list_admin_quiz_progress,
     list_documents,
     list_question_candidates,
@@ -54,9 +53,13 @@ from study_guide.question_extraction import candidate_rows, extract_question_can
 from study_guide.question_bank import (
     generate_bank_quiz,
     generate_custom_bank_quiz,
-    has_bank_topic,
 )
-from study_guide.quizzing import QuizError, generate_quiz, grade_quiz
+from study_guide.quizzing import (
+    QuizError,
+    generate_custom_quiz,
+    generate_quiz,
+    grade_quiz,
+)
 from study_guide.study_modes import STUDY_MODE_LABELS, STUDY_SCOPES, active_study_scope
 
 
@@ -237,12 +240,6 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
     st.title("Let’s test")
     client = build_client(settings)
     try:
-        try:
-            extracted_topic_ids = list_approved_question_topic_ids(
-                client, active_study_scope(st.session_state.get("study_mode"))
-            )
-        except DatabaseError:
-            extracted_topic_ids = set()
         topics = list_quiz_topics(client)
     except DatabaseError as exc:
         st.error(str(exc))
@@ -252,11 +249,6 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
         return
 
     topic_by_id = {topic["id"]: topic for topic in topics}
-    bank_topics = {
-        topic["id"]: topic
-        for topic in topics
-        if has_bank_topic(topic.get("name")) or topic.get("id") in extracted_topic_ids
-    }
     active = "active_quiz" in st.session_state
     quiz_type = st.radio(
         "Quiz type",
@@ -311,16 +303,11 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
             except (DatabaseError, QuizError) as exc:
                 st.error(str(exc))
     else:
-        if not bank_topics:
-            st.info(
-                "Custom Quiz needs built-in or approved questions. "
-                "Use Quick Quiz to generate from course material."
-            )
         selected_topic_ids = st.multiselect(
             "Topics",
-            list(bank_topics),
-            default=[next(iter(bank_topics))] if bank_topics else [],
-            format_func=lambda topic_id: bank_topics[topic_id]["name"],
+            list(topic_by_id),
+            default=[next(iter(topic_by_id))],
+            format_func=lambda topic_id: topic_by_id[topic_id]["name"],
             disabled=active,
         )
         question_count = st.selectbox(
@@ -348,12 +335,29 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
                     except DatabaseError:
                         reviewed = []
                     topic_sources[topic_by_id[topic_id]["name"]] = reviewed
-                with st.spinner("Preparing a custom quiz from reviewed questions…"):
-                    st.session_state.active_quiz = generate_custom_bank_quiz(
-                        topic_sources,
-                        question_count,
-                        tuple(difficulties),
-                    )
+                with st.spinner(
+                    "Checking available questions; generating from course material if needed…"
+                ):
+                    try:
+                        quiz = generate_custom_bank_quiz(
+                            topic_sources,
+                            question_count,
+                            tuple(difficulties),
+                        )
+                    except QuizError:
+                        quiz = generate_custom_quiz(
+                            tuple(topic_sources),
+                            question_count,
+                            tuple(difficulties),
+                            voyage_api_key=settings.voyage_api_key,
+                            ai_star_api_key=settings.ai_star_api_key,
+                            database_client=client,
+                            user_key=identity.user_key,
+                            study_scope=active_study_scope(
+                                st.session_state.get("study_mode")
+                            ),
+                        )
+                    st.session_state.active_quiz = quiz
                 st.session_state.active_quiz_kind = "custom"
                 st.rerun()
             except (DatabaseError, QuizError) as exc:

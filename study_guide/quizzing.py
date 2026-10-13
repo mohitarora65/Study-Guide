@@ -441,10 +441,74 @@ def generate_quiz(
     retrieve: Callable[[str], list[dict[str, Any]]] | None = None,
 ) -> GeneratedQuiz:
     topic = validate_topic_name(topic)
+    return _generate_quiz_from_material(
+        topic,
+        mastery_before=mastery_before,
+        mix=difficulty_mix(mastery_before),
+        voyage_api_key=voyage_api_key,
+        ai_star_api_key=ai_star_api_key,
+        database_client=database_client,
+        user_key=user_key,
+        study_scope=study_scope,
+        generator=generator,
+        retrieve=retrieve,
+    )
+
+
+def generate_custom_quiz(
+    topics: tuple[str, ...],
+    question_count: int,
+    difficulties: tuple[Difficulty, ...],
+    *,
+    voyage_api_key: str | None,
+    ai_star_api_key: str | None,
+    database_client: Any,
+    user_key: str,
+    study_scope: str | None = None,
+) -> GeneratedQuiz:
+    if question_count not in {5, 7, 10}:
+        raise QuizError("Choose 5, 7 or 10 questions.")
+    selected_levels = tuple(dict.fromkeys(difficulties))
+    if not selected_levels or any(
+        level not in {"easy", "medium", "hard"} for level in selected_levels
+    ):
+        raise QuizError("Choose at least one valid difficulty.")
+    topics = tuple(dict.fromkeys(validate_topic_name(topic) for topic in topics))
+    if not topics:
+        raise QuizError("Choose at least one quiz topic.")
+
+    base, remainder = divmod(question_count, len(selected_levels))
+    mix = {level: 0 for level in ("easy", "medium", "hard")}
+    for index, level in enumerate(selected_levels):
+        mix[level] = base + (index < remainder)
+    return _generate_quiz_from_material(
+        "Custom quiz · " + ", ".join(topics),
+        mastery_before=None,
+        mix=mix,
+        voyage_api_key=voyage_api_key,
+        ai_star_api_key=ai_star_api_key,
+        database_client=database_client,
+        user_key=user_key,
+        study_scope=study_scope,
+    )
+
+
+def _generate_quiz_from_material(
+    topic: str,
+    *,
+    mastery_before: int | None,
+    mix: dict[str, int],
+    voyage_api_key: str | None,
+    ai_star_api_key: str | None,
+    database_client: Any,
+    user_key: str,
+    study_scope: str | None,
+    generator: Generator | None = None,
+    retrieve: Callable[[str], list[dict[str, Any]]] | None = None,
+) -> GeneratedQuiz:
     if not voyage_api_key or not ai_star_api_key:
         raise QuizError("Quiz generation is not configured yet.")
     _check_quiz_rate_limit(user_key)
-    mix = difficulty_mix(mastery_before)
     retrieve = retrieve or (
         lambda selected_topic: retrieve_evidence(
             database_client,

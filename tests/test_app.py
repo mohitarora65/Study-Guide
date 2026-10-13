@@ -383,7 +383,6 @@ def generate(*args, **kwargs):
     st.session_state["fallback_scope"] = kwargs["study_scope"]
     return quiz
 with patch.object(app, "build_client", return_value=object()), \\
-     patch.object(app, "list_approved_question_topic_ids", return_value=set()), \\
      patch.object(app, "list_quiz_topics", return_value=[
          {"id": "ml-topic", "name": "machine learning", "active": True}
      ]), \\
@@ -404,24 +403,51 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert app.session_state["fallback_scope"] == "class_quiz"
 
 
-def test_quiz_page_shows_topic_with_approved_extracted_questions() -> None:
+def test_custom_quiz_shows_active_topic_and_uses_generation_fallback() -> None:
     script = '''
 from types import SimpleNamespace
 from unittest.mock import patch
 import app
+import streamlit as st
+from study_guide.quizzing import GeneratedQuiz, QuizError, QuizQuestion
 
+settings = SimpleNamespace(voyage_api_key="v" * 32, ai_star_api_key="a" * 32)
+identity = SimpleNamespace(user_key="synthetic-owner")
+question = QuizQuestion(
+    prompt="Question", options=("A", "B", "C", "D"), correct_index=0,
+    difficulty="easy", explanation="Explanation",
+    citations=({"display_name": "notes.pdf", "page_number": 1},),
+)
+quiz = GeneratedQuiz(
+    topic="Custom quiz · Uploaded topic", mastery_before=None,
+    difficulty_mix={"easy": 3, "medium": 2, "hard": 2},
+    questions=(question,) * 7,
+)
+def generate(topics, *args, **kwargs):
+    st.session_state["generated_topics"] = topics
+    st.session_state["fallback_scope"] = kwargs["study_scope"]
+    return quiz
 with patch.object(app, "build_client", return_value=object()), \\
-     patch.object(app, "list_approved_question_topic_ids", return_value={"topic-1"}), \\
      patch.object(app, "list_quiz_topics", return_value=[
          {"id": "topic-1", "name": "Uploaded topic", "active": True}
-     ]):
-    app.render_quiz_page(SimpleNamespace(), SimpleNamespace(user_key="owner"))
+     ]), \\
+     patch.object(app, "list_approved_questions", return_value=[]), \\
+     patch.object(app, "generate_custom_bank_quiz", side_effect=QuizError("No reviewed questions.")), \\
+     patch.object(app, "active_study_scope", return_value="class_quiz"), \\
+     patch.object(app, "generate_custom_quiz", side_effect=generate):
+    app.render_quiz_page(settings, identity)
 '''
     app = AppTest.from_string(script).run()
 
     assert not app.exception
-    assert app.selectbox[0].value == "topic-1"
-    assert any(button.label == "Start 7-question quiz" for button in app.button)
+    app.radio[0].set_value("Create Custom Quiz").run()
+    assert app.multiselect[0].options == ["Uploaded topic"]
+    next(button for button in app.button if button.label == "Create custom quiz").click().run()
+
+    assert not app.exception
+    assert app.session_state["generated_topics"] == ("Uploaded topic",)
+    assert app.session_state["fallback_scope"] == "class_quiz"
+    assert app.session_state["active_quiz"].topic == "Custom quiz · Uploaded topic"
 
 
 def test_student_progress_shows_mastery_and_attempt_summaries() -> None:
