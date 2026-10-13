@@ -9,13 +9,11 @@ from time import monotonic
 from typing import Any, Callable, Literal, TypedDict
 import unicodedata
 
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
 from study_guide.answering import (
-    AI_STAR_BASE_URL,
-    AI_STAR_MODEL,
     AnsweringError,
+    _call_ai_star,
     _generation_slots,
     embed_question,
     retrieve_evidence,
@@ -261,22 +259,16 @@ def _call_ai_star_langchain(api_key: str, messages: list[dict[str, str]]) -> str
     if not _generation_slots.acquire(blocking=False):
         raise QuizError("The assistant is busy. Please try again shortly.")
     try:
-        model = ChatOpenAI(
-            base_url=AI_STAR_BASE_URL,
-            api_key=api_key,
-            model=AI_STAR_MODEL,
-            temperature=0,
-            # Preserve the provider's field name; ChatOpenAI renames its own max_tokens.
-            extra_body={"max_tokens": MAX_QUIZ_OUTPUT_TOKENS},
-            max_retries=0,
-            timeout=30,
-        ).bind(response_format={"type": "json_object"})
-        response = model.invoke(messages)
-        if not isinstance(response.content, str) or not response.content:
-            raise ValueError("missing content")
-        return response.content
+        return _call_ai_star(
+            api_key,
+            messages,
+            max_tokens=MAX_QUIZ_OUTPUT_TOKENS,
+            content_validator=json.loads,
+        )
     except QuizError:
         raise
+    except AnsweringError as exc:
+        raise QuizError("Quiz generation is temporarily unavailable.") from exc
     except Exception as exc:
         raise QuizError("Quiz generation is temporarily unavailable.") from exc
     finally:

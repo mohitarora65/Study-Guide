@@ -213,55 +213,19 @@ def test_generated_quiz_retrieval_uses_selected_study_scope(monkeypatch: pytest.
     assert observed["study_scope"] == "class_quiz"
 
 
-def test_ai_star_adapter_disables_hidden_transport_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_quiz_adapter_uses_shared_fallback_with_quiz_token_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import study_guide.quizzing as quizzing
 
     captured: dict[str, object] = {}
 
-    class BoundModel:
-        def invoke(self, _messages: list[dict[str, str]]) -> object:
-            return type("Response", (), {"content": "{}"})()
+    def call_ai_star(api_key: str, messages: list[dict[str, str]], **kwargs: object) -> str:
+        captured.update({"api_key": api_key, "messages": messages, **kwargs})
+        kwargs["content_validator"]("{}")  # type: ignore[operator]
+        return "{}"
 
-    class Model:
-        def __init__(self, **kwargs: object) -> None:
-            captured.update(kwargs)
-
-        def bind(self, **_kwargs: object) -> BoundModel:
-            return BoundModel()
-
-    monkeypatch.setattr(quizzing, "ChatOpenAI", Model)
+    monkeypatch.setattr(quizzing, "_call_ai_star", call_ai_star)
 
     assert quizzing._call_ai_star_langchain("a" * 32, []) == "{}"
-    assert captured["max_retries"] == 0
-    assert captured["model"] == quizzing.AI_STAR_MODEL
-    assert captured["extra_body"] == {"max_tokens": quizzing.MAX_QUIZ_OUTPUT_TOKENS}
-    assert captured["timeout"] == 30
-
-
-def test_adapter_sends_provider_token_cap_on_wire(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx
-    from langchain_openai import ChatOpenAI
-    import study_guide.quizzing as quizzing
-
-    captured = {}
-
-    def respond(request):
-        captured.update(json.loads(request.content))
-        return httpx.Response(200, json={
-            "id": "synthetic-response", "object": "chat.completion", "created": 0,
-            "model": "synthetic-model", "choices": [{"index": 0,
-            "message": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}],
-        })
-
-    with httpx.Client(transport=httpx.MockTransport(respond)) as client:
-        monkeypatch.setattr(quizzing, "ChatOpenAI", lambda **kwargs: ChatOpenAI(
-            **kwargs, http_client=client
-        ))
-        assert quizzing._call_ai_star_langchain("synthetic-key", [
-            {"role": "user", "content": "Return JSON."}
-        ]) == "{}"
-
-    assert captured["max_tokens"] == 2000
-    assert captured["model"] == quizzing.AI_STAR_MODEL
-    assert "max_completion_tokens" not in captured
-    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["max_tokens"] == quizzing.MAX_QUIZ_OUTPUT_TOKENS

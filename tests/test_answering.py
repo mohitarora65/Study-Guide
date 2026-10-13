@@ -326,6 +326,35 @@ def test_ai_star_falls_back_after_truncated_response() -> None:
     assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
 
 
+def test_ai_star_falls_back_when_content_validator_rejects_response() -> None:
+    models: list[str] = []
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            content = "not json" if len(models) == 1 else "{}"
+            return json.dumps({
+                "choices": [{"finish_reason": "stop", "message": {"content": content}}]
+            }).encode()
+
+    def opener(request: object, *, timeout: int) -> Response:
+        models.append(json.loads(request.data)["model"])  # type: ignore[attr-defined]
+        return Response()
+
+    assert _call_ai_star(
+        "a" * 32,
+        [],
+        opener=opener,
+        content_validator=json.loads,
+    ) == "{}"
+    assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
+
+
 def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyPatch) -> None:
     import study_guide.answering as answering
 

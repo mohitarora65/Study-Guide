@@ -6,7 +6,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass
 from threading import BoundedSemaphore, Lock
 from time import monotonic
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -113,7 +113,14 @@ def _check_rate_limit(user_key: str) -> None:
             _user_requests.popitem(last=False)
 
 
-def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any = None) -> str:
+def _call_ai_star(
+    api_key: str,
+    messages: list[dict[str, str]],
+    *,
+    opener: Any = None,
+    max_tokens: int = MAX_OUTPUT_TOKENS,
+    content_validator: Callable[[str], Any] | None = None,
+) -> str:
     if not api_key:
         raise AnsweringError("Answer generation is not configured yet.")
     models = (AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL, AI_STAR_FINAL_FALLBACK_MODEL)
@@ -126,7 +133,7 @@ def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any =
                     "messages": messages,
                     "response_format": {"type": "json_object"},
                     "temperature": 0,
-                    "max_tokens": MAX_OUTPUT_TOKENS,
+                    "max_tokens": max_tokens,
                 }
             ).encode(),
             headers={
@@ -156,6 +163,8 @@ def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any =
             content = choice["message"].get("content")
             if not isinstance(content, str) or not content:
                 raise ValueError("response content missing")
+            if content_validator is not None:
+                content_validator(content)
             return content
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             if index < len(models) - 1:
