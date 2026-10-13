@@ -174,7 +174,7 @@ def validate_quiz_response(
         if not isinstance(raw_options, list) or len(raw_options) != 4:
             raise QuizError("Each question must have four options.")
         options = tuple(
-            _bounded_text(option, field="answer option", maximum=60)
+            _bounded_text(option, field="answer option", maximum=120)
             for option in raw_options
         )
         if len({_normalized(option) for option in options}) != 4:

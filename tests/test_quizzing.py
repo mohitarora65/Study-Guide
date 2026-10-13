@@ -69,8 +69,10 @@ def test_quiz_validation_maps_only_retrieved_citations() -> None:
 def test_quiz_validation_bounds_output_for_provider_token_cap() -> None:
     mix = difficulty_mix(None)
     payload = json.loads(quiz_json(mix))
-    payload["questions"][0]["options"][0] = "x" * 61
+    payload["questions"][0]["options"][0] = "x" * 120
+    assert len(validate_quiz_response(json.dumps(payload), EVIDENCE, mix)) == 7
 
+    payload["questions"][0]["options"][0] = "x" * 121
     with pytest.raises(QuizError, match="answer option"):
         validate_quiz_response(json.dumps(payload), EVIDENCE, mix)
 
