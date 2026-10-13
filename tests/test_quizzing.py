@@ -77,7 +77,7 @@ def test_quiz_validation_bounds_output_for_provider_token_cap() -> None:
         validate_quiz_response(json.dumps(payload), EVIDENCE, mix)
 
 
-def test_quiz_graph_stops_on_invalid_batch_without_repair() -> None:
+def test_quiz_graph_stops_after_one_invalid_batch_repair() -> None:
     mix = difficulty_mix(60)
     calls: list[list[dict[str, str]]] = []
 
@@ -90,7 +90,8 @@ def test_quiz_graph_stops_on_invalid_batch_without_repair() -> None:
     )
 
     assert "not valid JSON" in result["safe_error"]
-    assert len(calls) == 1
+    assert len(calls) == 2
+    assert "failed validation" in calls[1][-1]["content"]
 
 
 @pytest.mark.parametrize("mastery", [None, 60, 85])
@@ -117,19 +118,26 @@ def test_batches_preserve_mix_and_bound_calls(mastery: int | None) -> None:
         assert [sum(batch.values()) for batch in calls] == [1, 3, 3]
 
 
-def test_duplicate_across_batches_stops_before_next_call() -> None:
-    calls = []
+def test_duplicate_across_batches_is_repaired_once() -> None:
+    calls: list[list[dict[str, str]]] = []
 
     def generate(messages):
         batch_mix = json.loads(messages[1]["content"])["required_difficulty_mix"]
-        calls.append(batch_mix)
-        return quiz_json(batch_mix)
+        calls.append(messages)
+        payload = json.loads(quiz_json(batch_mix))
+        if len(calls) == 3:
+            payload["questions"][0]["question"] = "A distinct repaired question?"
+        return json.dumps(payload)
 
     result = build_quiz_graph(retrieve=lambda _: EVIDENCE, generate=generate).invoke(
-        {"topic": "Vector spaces", "difficulty_mix": difficulty_mix(85)}
+        {
+            "topic": "Vector spaces",
+            "difficulty_mix": {"easy": 1, "medium": 1, "hard": 0},
+        }
     )
-    assert "duplicate questions" in result["safe_error"]
-    assert len(calls) == 2
+    assert len(result["questions"]) == 2
+    assert len(calls) == 3
+    assert "duplicate questions" in calls[2][-1]["content"]
 
 
 def test_quiz_graph_stops_before_generation_without_evidence() -> None:

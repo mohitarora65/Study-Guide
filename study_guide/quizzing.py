@@ -355,12 +355,37 @@ def build_quiz_graph(
                     messages.append({"role": "user", "content": json.dumps(
                         {"avoid_previous_questions": [row["question"] for row in rows]}
                     )})
+
+                candidate_mix = {
+                    level: accumulated[level] + batch_mix[level] for level in mix
+                }
+
+                def validated_batch(raw: str) -> list[dict[str, Any]]:
+                    validate_quiz_response(raw, state["evidence"], batch_mix)
+                    batch_rows = json.loads(raw)["questions"]
+                    validate_quiz_response(
+                        json.dumps({"questions": rows + batch_rows}),
+                        state["evidence"],
+                        candidate_mix,
+                    )
+                    return batch_rows
+
                 raw = generate(messages)
-                validate_quiz_response(raw, state["evidence"], batch_mix)
-                rows.extend(json.loads(raw)["questions"])
-                for level, count in batch_mix.items():
-                    accumulated[level] += count
-                validate_quiz_response(json.dumps({"questions": rows}), state["evidence"], accumulated)
+                try:
+                    batch_rows = validated_batch(raw)
+                except QuizError as exc:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"The previous batch failed validation: {exc} "
+                            "Generate one new replacement batch with the same difficulty mix. "
+                            "Use distinct question text and concepts, avoid all previous questions, "
+                            "and return only the required JSON object."
+                        ),
+                    })
+                    batch_rows = validated_batch(generate(messages))
+                rows.extend(batch_rows)
+                accumulated = candidate_mix
             return {"raw_output": json.dumps({"questions": rows})}
         except QuizError as exc:
             return {"safe_error": str(exc)}
