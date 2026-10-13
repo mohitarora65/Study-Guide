@@ -277,7 +277,7 @@ def test_ai_star_does_not_fallback_after_non_retryable_http_error() -> None:
     assert "secret provider detail" not in str(error.value)
 
 
-def test_ai_star_does_not_fallback_after_invalid_response() -> None:
+def test_ai_star_tries_all_models_after_invalid_responses() -> None:
     calls = 0
 
     class Response:
@@ -297,7 +297,33 @@ def test_ai_star_does_not_fallback_after_invalid_response() -> None:
 
     with pytest.raises(AnsweringError, match="temporarily unavailable"):
         _call_ai_star("a" * 32, [], opener=opener)
-    assert calls == 1
+    assert calls == 3
+
+
+def test_ai_star_falls_back_after_truncated_response() -> None:
+    models: list[str] = []
+
+    class Response:
+        def __init__(self, finish_reason: str) -> None:
+            self.finish_reason = finish_reason
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps({
+                "choices": [{"finish_reason": self.finish_reason, "message": {"content": "{}"}}]
+            }).encode()
+
+    def opener(request: object, *, timeout: int) -> Response:
+        models.append(json.loads(request.data)["model"])  # type: ignore[attr-defined]
+        return Response("length" if len(models) == 1 else "stop")
+
+    assert _call_ai_star("a" * 32, [], opener=opener) == "{}"
+    assert models == [AI_STAR_MODEL, AI_STAR_FALLBACK_MODEL]
 
 
 def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -356,6 +382,7 @@ def test_answer_question_repairs_invalid_output_once(monkeypatch: pytest.MonkeyP
     assert "Streamlit-compatible Markdown" in system_prompt
     assert "lead with the direct answer" in system_prompt
     assert "display mathematics in $$ on separate lines" in system_prompt
+    assert "under 400 words and use simple English" in system_prompt
     assert "Do not include citations, references or a sources section" in system_prompt
     request_data = json.loads(requests[0][1]["content"])  # type: ignore[index]
     assert request_data["recent_conversation"] == [{"role": "user", "content": "Why is that?"}]

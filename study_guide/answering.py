@@ -158,6 +158,8 @@ def _call_ai_star(api_key: str, messages: list[dict[str, str]], *, opener: Any =
                 raise ValueError("response content missing")
             return content
         except (ValueError, KeyError, IndexError, TypeError) as exc:
+            if index < len(models) - 1:
+                continue
             raise AnsweringError("Answer generation is temporarily unavailable.") from exc
     raise AnsweringError("Answer generation is temporarily unavailable.")
 
@@ -226,7 +228,8 @@ def answer_question(
                 "cited_chunk_ids (array of supplied IDs). Format answer as concise Streamlit-compatible "
                 "Markdown: lead with the direct answer; use short paragraphs, bullets, or numbered steps "
                 "only when helpful; wrap inline mathematics in $...$ and display mathematics in $$ on "
-                "separate lines. Do not include citations, references or a sources section in the answer text. "
+                "separate lines. Keep the answer under 400 words and use simple English. Do not include "
+                "citations, references or a sources section in the answer text. "
                 "Cite only evidence that supports the answer."
             ),
         },
