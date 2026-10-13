@@ -388,6 +388,9 @@ def render_quiz_page(settings: Settings, identity: Identity) -> None:
                 if values["total"]
             )
         )
+        if st.button("Take another test", type="primary"):
+            _clear_quiz_session()
+            st.rerun()
         for number, (question, answer) in enumerate(
             zip(quiz.questions, result["answers"], strict=True), start=1
         ):

@@ -263,6 +263,9 @@ with patch.object(app, "build_client", return_value=object()), \\
     assert saved["correct_count"] == 7
     assert "questions" not in saved
     assert any("Score: 7/7" in success.value for success in app.success)
+    next(button for button in app.button if button.label == "Take another test").click().run()
+    assert "active_quiz" not in app.session_state
+    assert any(button.label == "Start 7-question quiz" for button in app.button)
 
 
 def test_custom_quiz_is_practice_only_and_summarizes_five_questions() -> None:
